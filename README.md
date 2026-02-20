@@ -1,63 +1,45 @@
-# Dev2019
+# Geometry of PFC representations across adolescent development
 
-ODR D task
-0.	Table of significant neurons (for each monkey, time point, aligned to developmental marker)
-•	Also break down by area (posterior vs. anterior PFC)
-•	ACC
-1.	PSTH aligned to the 2-plate closure timepoint
-•	ODR
-•	ODRD
-•	Antisaccade
-    A.	All neurons
-    B.	All significant Neurons
-    C.	Significant C, D neurons
+Code and data for the Procrustes analysis of prefrontal cortex (PFC) neural tuning geometry across development, as part of:
 
-2.	Comparison of delay period activity in time
-3.	Fano factor
-4.	Spike-count correlation (for pairs of neurons) 
-5.	Discriminability between stimuli
-•	ROC analysis
-•	Tuning width
-•	Decoding analysis - using entire population
-6.	dPCA
-7.	PCA - dimensionality reduction
-8.	Behavior analysis
-•	Training trajectory of each monkey
-•	Precision in ODR
-•	Accuracy in ODR
-•	Different Error codes
-•	Error rate as a function of distractor distance from cue
-•	Reaction Time
-•	Serial bias (we expect higher NMDA expression in older animals -> stronger serial bias)
-9.	Firing rate as a function of performance
-•	Match young, older sessions for performance - plot firing rate
-•	Firing rate as a function of performance
-•	Intercepts of firing rate as function of performance differ for ODR and ODRD tasks
-•	Firing rate in correct vs. error trials
-•	Tuning bias
+> Zhu, J., Garin, C.M., Qi, X.-L., Machado, A., Wang, Z., Ben Hamed, S., Stanford, T.R., Salinas, E., Whitlow, C.T., Anderson, A.W., Zhou, X.M., Calabro, F.J., Luna, B. & Constantinidis, C. **Longitudinal measures of monkey brain structure and activity through adolescence predict cognitive maturation.** *Nature Neuroscience* 28, 2344--2355 (2025). https://doi.org/10.1038/s41593-025-02076-0
 
-10.	Alternative theories of working memory
-•	LFPs
-•	γ-bursting rate
-•	"silent" decoding
-11.	Cross-correlation: strength of connections between neurons
+The [paper PDF](paper.pdf) is included in this repository.
 
+## Overview
 
+This repository asks: **does the geometry of PFC neural representations change during adolescent development?**
 
-ANTISACCADE TASK
-1.	Behavior as a function of time from maturation milestone
-•	Performance in three variants of the task
-•	Trial outcomes in each task variant
-•	Reaction time
-•	Tachometric curve
-2. Cue and Saccade related firing rate as a function of time
-•	Identify V, M, VM neurons
-•	Ipsilateral vs. Contralateral Responses
-3. Relationship of firing rate with performance:
-•	Splitting High - Low performance sessions
-•	Correct and Error Trials: split between cue and saccade responses
-•	Choice Probability
-4. Vector inversion
-•	Related: Time-resolved ROC analysis
-5. Mixed selectivity for Cue location in ODR vs. Antisaccade task
-6. Relationship between ODR delay period and antisaccade baseline
+We use Procrustes analysis to compare the tuning curve geometry of PFC neurons across 8 monkeys tracked longitudinally from adolescence to adulthood. Neurons are grouped by monkey and age group, projected into a common PCA space, and aligned using Procrustes. The resulting distances quantify how similar neural representations are across individuals and developmental stages.
+
+## Data
+
+Two `.mat` files in `data_raw/` contain single-neuron recordings from dlPFC during working memory tasks:
+
+- `odr_data_both_sig_is_best_20240109.mat` -- ODR task (1.5s and 3.0s delay), 8 monkeys, 1180 + 922 neurons
+- `odrd_data_sig_on_best_20231018.mat` -- ODR with distractor task, 4 monkeys, 1319 neurons (20 conditions)
+
+## Pipeline
+
+The analysis is in [`analyses/pipeline.ipynb`](analyses/pipeline.ipynb), which imports all functions from `analyses/functions/`:
+
+1. **Load data** -- parse `.mat` files, extract neuron metadata (monkey ID, age, maturation date)
+2. **PSTHs and tuning curves** -- bin spikes, compute mean firing rates per condition and epoch
+3. **Age groups** -- assign neurons to 3 age terciles per monkey
+4. **PCA + Procrustes** -- z-score, reduce to 8 PCs, compute pairwise Procrustes distances
+5. **Cross-monkey analysis** -- are cross-monkey distances larger than within-monkey?
+6. **Cross-age analysis** -- are same-age cross-monkey pairs more similar than different-age pairs?
+7. **Temporal analysis** -- sliding-window Procrustes distances with bootstrap CIs
+8. **Age-pair comparisons** -- G0-G1 vs G1-G2 vs G0-G2 temporal trajectories
+
+## Requirements
+
+```
+numpy
+scipy
+matplotlib
+```
+
+## License
+
+See [LICENSE](cog_mat_ado_release/LICENSE).
