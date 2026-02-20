@@ -1,0 +1,227 @@
+# setup
+load libraries
+define some functions
+```{r}
+# Set the working directory to the specified path
+setwd("C:/Users/cclab/Documents/GitHub/Dev2019/GAM")
+
+# Load necessary libraries/packages
+library(dplyr)      # Data manipulation 
+library(ggplot2)    # Data visualization
+library(gratia)     # Tools for GAM models
+library(gridExtra)  # Arranging ggplot2 plots on a grid
+library(lubridate)  # Work with date-times
+library(mgcv)       # GAM and GAMM functions
+library(purrr)      # Functional programming tools
+library(stringr)    # String manipulation
+library(tidyr)      # Data tidying
+library(xtable)     # Export tables to various formats
+```
+
+```{r}
+# Define a function to plot raw data, fitted values, and pointwise 95% confidence intervals from a GAMM
+plot_gamm <- function(model,predictor = 'age', x_axis_label = '', y_axis_label = '', sig = TRUE, color_map = NULL) {
+  outcome <- str_split(as.character(model$gam$formula), '~')[[2]]
+  dat_clean <- dat %>% drop_na(all_of(outcome))
+  newdat <- data.frame(dat_clean[[predictor]])
+  names(newdat) <- predictor
+  pred <- predict.gam(model$gam, 
+                      newdata = newdat,
+                      type = 'response', 
+                      se.fit = TRUE)
+  
+  plotdat <- data.frame(cbind(dat_clean[[predictor]], pred$fit, pred$se))
+  plotdat <- plotdat %>% 
+    mutate(outcome = 1) 
+  names(plotdat) <- c(predictor, 'fit', 'se', outcome)
+  
+      # If a color map is provided, use it. Otherwise, use the default color.
+ if (!is.null(color_map)) {
+    individual_colors <- dat$ID %>% as.character() %>% factor() %>% levels() %>% setNames(., .) %>% color_map[.]
+} else {
+    individual_colors <- "blue"  # or any other default color you'd like
+}
+  if (sig == TRUE){
+    plotcolor_fit <- '#476FD1'
+  } else {
+    plotcolor_fit <- 'grey50'
+  }
+  gammplot <- ggplot(dat, aes_string(x = predictor, y = outcome, group = "ID", color = "ID")) + 
+    #geom_line(alpha = .4) + 
+    geom_point(alpha = .3, shape = 16) +
+    (if (!is.null(color_map)) scale_color_manual(values = color_map) else scale_color_identity()) +
+    geom_ribbon(data = plotdat, aes_string(x = predictor, ymin = "fit - (1.96 * se)", ymax = "fit + (1.96 * se)"), alpha = .6, fill = plotcolor_fit, inherit.aes = FALSE) + 
+    geom_line(data = plotdat, aes_string(x = predictor, y = "fit"), color = plotcolor_fit, inherit.aes = FALSE) + 
+    
+    labs(x = x_axis_label, 
+         y = y_axis_label) +
+    theme_bw() +
+    theme(panel.border = element_blank(), 
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), 
+          axis.line = element_line(colour = 'black')) +
+    theme(axis.title = element_text(size = 11),
+          axis.text = element_text(size = 10))
+  return(gammplot)
+}
+
+# Define a function for post-hoc analysis to identify periods of developmental change
+calc_dev_change <- function(model) {
+  # Calculate derivatives of the model
+  deriv <- gratia::derivatives(model)
+  deriv <- deriv %>%
+    mutate(sig = !(0 > lower & 0 < upper)) 
+  # Identify ages of significant change
+  ages <- list(c(min(deriv$data[deriv$sig == TRUE]), 
+                 max(deriv$data[deriv$sig == TRUE])))
+  return(ages[[1]])
+}
+
+my_color <- c("OLI" = "#E73133", "PIC" = "#4B8BBF", "QUA" = "#5FB75C", "ROS" = "#FF8C1A",
+              "SON" = "#DDCF6E", "TRI" = "#AF673E", "UNI" = "#F88EC5", "VIK" = "#A3A3A3")
+```
+# read data
+```{r}
+# Read the dataset from a CSV file
+dat <- read.csv('sac_RT.csv', 
+                stringsAsFactors = FALSE) 
+```
+#read odrd data
+```{r}
+# Read the dataset from a CSV file
+dat <- read.csv('sac_odrd.csv', 
+                stringsAsFactors = FALSE) 
+header_list <- as.list(names(dat))
+names_to_omit <- c('RT')
+header_list <- header_list[match(names_to_omit, header_list)]
+
+list_all =  header_list
+print(list_all)
+```
+# model RT on age
+```{r}
+# Define a formula for the GAMM to model DI as a smoothed function of age
+model_formula <- as.formula("RT ~ s(age, k = 5, fx = FALSE, bs = 'cs')")
+# Fit the GAMM with the formula, and a random effect of 'id' on 'age'
+gamm_rt_on_age <- gamm(as.formula(model_formula), 
+                                      #family = 'quasibinomial',
+                                      random = list(ID=~1+age),
+                                      data = dat %>% drop_na(all_of('RT')),
+                                      method = 'REML')
+# View summary statistics of the GAM and linear mixed-effects components of the model
+summary(gamm_rt_on_age$gam)
+summary(gamm_rt_on_age$lme)
+# Check diagnostics of the GAM model
+par(mfrow = c(2,2))
+gam.check(gamm_rt_on_age$gam)
+```
+# model RT on mature
+```{r}
+# Define a formula for the GAMM to model 'rate' as a smoothed function of mature ('mature')
+model_formula <- as.formula("RT ~ s(mature, k = 5, fx = FALSE, bs = 'cs')")
+# Fit the GAMM with the formula, and a random effect of 'id' on 'mature'
+gamm_rt_on_mat <- gamm(as.formula(model_formula), 
+                                      family = 'gaussian',
+                                      random = list(ID=~1+mature),
+                                      data = dat %>% drop_na(all_of('RT')), 
+                                      method = 'REML')
+# View summary statistics of the GAM and linear mixed-effects components of the model
+summary(gamm_rt_on_mat$gam)
+summary(gamm_rt_on_mat$lme)
+# Check diagnostics of the GAM model
+par(mfrow = c(2,2))
+gam.check(gamm_rt_on_mat$gam)
+```
+# find sig range
+```{r}
+# Identify significant periods of developmental change
+rt_on_age_devchange <- calc_dev_change(gamm_rt_on_age)
+rt_on_age_devchange
+rt_on_mat_devchange <- calc_dev_change(gamm_rt_on_mat)
+rt_on_mat_devchange
+```
+
+#plot RT on age
+```{r}
+# Plot the model results using previously defined function
+rt_on_age_plot <- plot_gamm(
+  model = gamm_rt_on_age, 
+  predictor = 'age',
+  x_axis_lab = 'Age (month)',
+  y_axis_lab = 'Reaction time (s)',
+  sig = TRUE, color_map = my_color)
+
+# Extract y-axis range from current plot
+  y_range <- layer_scales(rt_on_age_plot)$y$range$range
+  # Set ymin and ymax based on y_range.
+  ymin_value <- y_range[1] - 0.001 * (y_range[2] - y_range[1])
+  ymax_value <- y_range[1] 
+# Annotate the plot with a bar indicating significant developmental change
+rt_on_age_plot <- rt_on_age_plot +
+  annotate(geom = "rect", 
+           xmin = rt_on_age_devchange[1], 
+           xmax = rt_on_age_devchange[2], 
+           ymin = ymin_value, 
+           ymax = ymax_value, 
+           fill = '#476FD1') +
+  geom_vline(xintercept = 57.9, linetype="dashed", color = "brown")
+```
+#plot RT on mature
+```{r}
+# Plot the model results using previously defined function
+rt_on_mat_plot <- plot_gamm(
+  model = gamm_rt_on_mat, 
+  predictor = 'mature',
+  x_axis_lab = 'Maturation (month)',
+  y_axis_lab = 'Reaction time (s)',
+  sig = TRUE, color_map = my_color)
+# Extract y-axis range from current plot
+  y_range <- layer_scales(rt_on_mat_plot)$y$range$range
+  # Set ymin and ymax based on y_range
+  ymin_value <- y_range[1] - 0.001 * (y_range[2] - y_range[1])
+  ymax_value <- y_range[1] 
+# Annotate the plot with a bar indicating significant developmental change
+rt_on_mat_plot <- rt_on_mat_plot + 
+  annotate(geom = "rect", 
+           xmin = rt_on_mat_devchange[1], 
+           xmax = rt_on_mat_devchange[2], 
+           ymin = ymin_value, 
+           ymax = ymax_value, 
+           fill = '#476FD1') +
+  scale_x_continuous(labels = function(x) x + 57.9) +
+  geom_vline(xintercept = 0, linetype="dashed", color = "brown")
+```
+
+```{r}
+# Arrange the plots in a 2x2 grid:
+gridExtra::grid.arrange(rt_on_age_plot, rt_on_mat_plot,
+                        ncol = 2)
+combined_plot <- gridExtra::arrangeGrob(rt_on_age_plot, rt_on_mat_plot,
+                                        ncol = 2,
+                                        top = "Predicted Variable: RT")
+```
+#save plots
+```{r}
+# Save the current grid display
+ggsave("RT_odrd.png", plot = combined_plot, width = 10, height = 6)
+ggsave("RT_odrd.pdf", plot = combined_plot, width = 10, height = 6)
+```
+
+# save fitted curve
+```{r}
+# Assuming 'dat' has been prepared and 'gamm_rt_on_mat' is the fitted model for 'RT'
+
+# Generate a sequence of maturation ages covering the range of your data
+maturation_ages <- seq(min(dat$mature, na.rm = TRUE), max(dat$mature, na.rm = TRUE), length.out = 100)
+
+# Generate predicted values for RT over this range
+predicted_RT <- predict(gamm_rt_on_mat$gam, newdata = data.frame(mature = maturation_ages), type = "response")
+
+# Create a data frame to save
+data_to_save_RT <- data.frame(mature = maturation_ages, predicted_RT = predicted_RT)
+
+# Save the data frame to a CSV file
+write.csv(data_to_save_RT, "predicted_RT_vs_mature.csv", row.names = FALSE)
+
+```
+

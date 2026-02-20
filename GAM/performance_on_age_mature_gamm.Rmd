@@ -1,0 +1,400 @@
+#setup
+load libraries
+define some functions
+```{r}
+# Set the working directory to the specified path
+setwd("C:/Users/cclab/Documents/GitHub/Dev2019/GAM")
+
+# Load necessary libraries/packages
+library(dplyr)      # Data manipulation 
+library(ggplot2)    # Data visualization
+library(gratia)     # Tools for GAM models
+library(gridExtra)  # Arranging ggplot2 plots on a grid
+library(lubridate)  # Work with date-times
+library(mgcv)       # GAM and GAMM functions
+library(purrr)      # Functional programming tools
+library(stringr)    # String manipulation
+library(tidyr)      # Data tidying
+library(xtable)     # Export tables to various formats
+```
+
+```{r}
+# Define a function to plot raw data, fitted values, and pointwise 95% confidence intervals from a GAMM
+plot_gamm <- function(model,predictor = 'age', x_axis_label = '', y_axis_label = '', sig = TRUE, color_map = NULL) {
+  outcome <- str_split(as.character(model$gam$formula), '~')[[2]]
+  dat_clean <- dat %>% drop_na(all_of(outcome))
+  newdat <- data.frame(dat_clean[[predictor]])
+  names(newdat) <- predictor
+  pred <- predict.gam(model$gam, 
+                      newdata = newdat,
+                      type = 'response', 
+                      se.fit = TRUE)
+  
+  plotdat <- data.frame(cbind(dat_clean[[predictor]], pred$fit, pred$se))
+  plotdat <- plotdat %>% 
+    mutate(outcome = 1) 
+  names(plotdat) <- c(predictor, 'fit', 'se', outcome)
+  
+      # If a color map is provided, use it. Otherwise, use the default color.
+ if (!is.null(color_map)) {
+    individual_colors <- dat$ID %>% as.character() %>% factor() %>% levels() %>% setNames(., .) %>% color_map[.]
+} else {
+    individual_colors <- "blue"  # or any other default color you'd like
+}
+  if (sig == TRUE){
+    plotcolor_fit <- '#476FD1'
+  } else {
+    plotcolor_fit <- 'grey50'
+  }
+  gammplot <- ggplot(dat, aes_string(x = predictor, y = outcome, group = "ID", color = "ID")) + 
+    #geom_line(alpha = .4) + 
+    geom_point(alpha = .3, shape = 16) +
+    (if (!is.null(color_map)) scale_color_manual(values = color_map) else scale_color_identity()) +
+    geom_ribbon(data = plotdat, aes_string(x = predictor, ymin = "fit - (1.96 * se)", ymax = "fit + (1.96 * se)"), alpha = .6, fill = plotcolor_fit, inherit.aes = FALSE) + 
+    geom_line(data = plotdat, aes_string(x = predictor, y = "fit"), color = plotcolor_fit, inherit.aes = FALSE) + 
+    
+    labs(x = x_axis_label, 
+         y = y_axis_label) +
+    theme_bw() +
+    theme(panel.border = element_blank(), 
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), 
+          axis.line = element_line(colour = 'black')) +
+    theme(axis.title = element_text(size = 11),
+          axis.text = element_text(size = 10))
+  return(gammplot)
+}
+
+# Define a function for post-hoc analysis to identify periods of developmental change
+calc_dev_change <- function(model) {
+  # Calculate derivatives of the model
+  deriv <- gratia::derivatives(model)
+  deriv <- deriv %>%
+    mutate(sig = !(0 > lower & 0 < upper)) 
+  # Identify range of significant change
+  ranges <- list(c(min(deriv$data[deriv$sig == TRUE]), 
+                 max(deriv$data[deriv$sig == TRUE])))
+  return(ranges[[1]])
+}
+
+get_peak_and_velocity <- function(model, predictor = 'age') {
+  outcome <- str_split(as.character(model$gam$formula), '~')[[2]]
+  # Clean the data
+  dat_clean <- dat %>% drop_na(all_of(outcome))
+  
+  # Create new data for prediction
+  newdat <- data.frame(dat_clean[[predictor]])
+  names(newdat) <- predictor
+  
+  # Predict the values
+  pred <- predict.gam(model$gam, 
+                      newdata = newdat,
+                      type = 'response', 
+                      se.fit = TRUE)
+  
+  # Create a dataframe with predictions
+  pred_dat <- data.frame(predictor = dat_clean[[predictor]], fit = pred$fit)
+  
+  # Find the peak value's predictor
+  peak_x <- pred_dat$predictor[which.max(pred_dat$fit)]
+  peak_y <- max(pred_dat$fit)
+  
+  # Determine the Peak Rate of Change (Velocity)
+  derivi <- gratia::derivatives(model$gam)
+  peak_velocity_x <- derivi$data[which.max(abs(derivi$derivative))]
+  closest_idx <- which.min(abs(pred_dat$predictor - peak_velocity_x))
+  peak_velocity_y <- pred_dat$fit[closest_idx]
+  
+  return(list(peak_value_x = peak_x, peak_velocity_x = peak_velocity_x, peak_value_y = peak_y, peak_velocity_y = peak_velocity_y))
+}
+
+my_color <- c("OLI" = "#E73133", "PIC" = "#4B8BBF", "QUA" = "#5FB75C", "ROS" = "#FF8C1A",
+              "SON" = "#DDCF6E", "TRI" = "#AF673E", "UNI" = "#F88EC5", "VIK" = "#A3A3A3")
+```
+
+# read data
+```{r}
+# Read the dataset from a CSV file
+dat <- read.csv('performance_odrd.csv', 
+                stringsAsFactors = FALSE) 
+# dat <- read.csv('performance_odr.csv', 
+#                 stringsAsFactors = FALSE) 
+```
+# clean data
+```{r}
+header_list <- as.list(names(dat))
+names_to_omit <- c("percorr")
+header_list <- header_list[match(names_to_omit, header_list)]
+
+list_all =  header_list
+print(list_all)
+```
+# modeling on age
+```{r}
+list_of_regressor = c('age')
+list_of_regressor_string = c('age')
+
+# Initialize a list to store the models
+models_age_list <- list()
+peak_and_velocity_age_list <- list()
+for(L in 1:length(list_of_regressor)){
+  regressor = list_of_regressor[L]
+  regressor_string = list_of_regressor_string[L]
+  
+  for(R in 1:length(list_all)){
+    current_somatic = list_all[[R]]
+
+    for(depend in current_somatic){
+      print(paste("Regressor:", regressor, "| Response:", depend))
+      
+      # Define a formula for the GAMM to model the current response as a smoothed function of the current regressor
+      model_formula <- as.formula(paste(depend, "~ s(", regressor, ", k = 5, fx = FALSE, bs = 'tp')"))
+      
+      # Fit the GAMM with the formula, and a random effect of id on the current regressor
+      gamm_res_on_dev <- gamm(as.formula(model_formula), 
+                               family = 'quasibinomial',
+                               random = list(ID=~1+age),
+                               data = dat %>% drop_na(all_of(c(depend, regressor))),
+                               method = 'REML')
+      peak_and_velocity <- get_peak_and_velocity(model = gamm_res_on_dev, predictor = regressor)
+      # Save the model to the list
+      model_name <- paste(depend, regressor, sep="_")
+      models_age_list[[model_name]] <- gamm_res_on_dev
+      peak_and_velocity_age_list[[model_name]] <- peak_and_velocity
+    }
+  }
+}
+```
+modeling on mature
+```{r}
+list_of_regressor = c('mature')
+list_of_regressor_string = c('mature')
+
+# Initialize a list to store the models
+models_mat_list <- list()
+peak_and_velocity_mat_list <- list()
+
+for(L in 1:length(list_of_regressor)){
+  regressor = list_of_regressor[L]
+  regressor_string = list_of_regressor_string[L]
+  
+  for(R in 1:length(list_all)){
+    current_depend = list_all[[R]]
+
+    for(depend in current_depend){
+      print(paste("Regressor:", regressor, "| Response:", depend))
+      
+      # Define a formula for the GAMM to model the current response as a smoothed function of the current regressor
+      model_formula <- as.formula(paste(depend, "~ s(", regressor, ", k = 20, fx = FALSE, bs = 'tp')"))
+      
+      # Fit the GAMM with the formula, and a random effect of 'id' on the current 'regressor'
+      gamm_res_on_dev <- gamm(as.formula(model_formula), 
+                               family = 'quasibinomial',
+                               random = list(ID=~1+mature),
+                               data = dat %>% drop_na(all_of(c(depend, regressor))),
+                               method = 'REML')
+      peak_and_velocity <- get_peak_and_velocity(model = gamm_res_on_dev, predictor = regressor)
+      # Save the model to the list
+      model_name <- paste(depend, regressor, sep="_")
+      models_mat_list[[model_name]] <- gamm_res_on_dev
+      peak_and_velocity_mat_list[[model_name]] <- peak_and_velocity
+    }
+  }
+}
+```
+
+# plot on age
+```{r}
+# Loop through the model names in models_list
+for(model_name in names(models_age_list)) {
+  
+  # Extract the current model
+  current_model <- models_age_list[[model_name]]
+  current_peak <- peak_and_velocity_age_list[[model_name]]
+  
+  # Identify significant periods of developmental change using the calc_dev_change function
+  dev_change <- calc_dev_change(current_model)
+  print(paste("Model:", model_name, "| Significant Developmental Change:", toString(dev_change)))
+  if (all(is.infinite(dev_change))) {
+    sig <- FALSE
+    dev_change <- 57.9
+  } else {
+    sig <- TRUE
+  }
+  
+  # Plot this model
+  current_plot <- plot_gamm(
+    predictor = 'age',
+    model = current_model, 
+    y_axis_lab = 'Outcome Value',
+    sig = sig, color_map = my_color)
+  # Annotate the plot with a bar indicating significant developmental change
+  # Extract y-axis range from current_plot
+  y_range <- layer_scales(current_plot)$y$range$range
+  # Set ymin and ymax based on y_range
+  ymin_value <- y_range[1] - 0.01 * (y_range[2] - y_range[1])
+  ymax_value <- y_range[1] 
+  
+  current_plot <- current_plot + labs(title = model_name) +
+    annotate(geom = "rect", 
+             xmin = dev_change[1], 
+             xmax = dev_change[2], 
+             ymin = ymin_value, 
+             ymax = ymax_value, 
+             fill = '#476FD1') +
+    geom_point(aes(x = current_peak$peak_value_x, y = current_peak$peak_value_y), shape = 24, size = 3, color = "red") +
+    geom_point(aes(x = current_peak$peak_velocity_x, y = current_peak$peak_velocity_y, type = "response"), shape = 1, size = 3, color = "blue")+
+    geom_vline(xintercept = 57.9, linetype="dashed", color = "brown")
+  print(current_plot)
+  # Define file names based on the model name
+  png_file_name <- paste0(model_name, '.png')
+  pdf_file_name <- paste0(model_name, '.pdf')
+  
+  # Save the plot in PNG format
+  #ggsave(png_file_name, plot = current_plot, device = 'png', width = 8, height = 4, dpi = 300)
+
+  # Save the plot in PDF format
+  #ggsave(pdf_file_name, plot = current_plot, device = 'pdf', width = 8, height = 4)
+
+
+}
+```
+# plot on mature
+```{r}
+# Loop through the model names in models_list
+for(model_name in names(models_mat_list)) {
+  
+  # Extract the current model
+  current_model <- models_mat_list[[model_name]]
+  current_peak <- peak_and_velocity_mat_list[[model_name]]
+  
+  # Identify significant periods of developmental change using the calc_dev_change function
+  dev_change <- calc_dev_change(current_model)
+  print(paste("Model:", model_name, "| Significant Developmental Change:", toString(dev_change)))
+    if (all(is.infinite(dev_change))) {
+    sig <- FALSE
+    dev_change <- 0
+  } else {
+    sig <- TRUE
+  }
+  # Plot this model
+  current_plot <- plot_gamm(
+    predictor = 'mature',
+    model = current_model, 
+    x_axis_lab = 'Maturation (month)',
+    y_axis_lab = 'Percentage correct',
+    sig = sig, color_map = my_color)
+  # Annotate the plot with a bar indicating significant developmental change
+  # Extract y-axis range from current_plot
+  y_range <- layer_scales(current_plot)$y$range$range
+  # Set ymin and ymax based on y_range
+  ymin_value <- y_range[1] - 0.01 * (y_range[2] - y_range[1])
+  ymax_value <- y_range[1] 
+  
+  current_plot <- current_plot + labs(title = model_name) +
+    annotate(geom = "rect", 
+             xmin = dev_change[1], 
+             xmax = dev_change[2], 
+             ymin = ymin_value, 
+             ymax = ymax_value, 
+             fill = '#476FD1') +
+    geom_point(aes(x = current_peak$peak_value_x, y = current_peak$peak_value_y), shape = 24, size = 3, color = "red") +
+    geom_point(aes(x = current_peak$peak_velocity_x, y = current_peak$peak_velocity_y, type = "response"), shape = 1, size = 3, color = "blue") +
+    geom_vline(xintercept = 0, linetype="dashed", color = "brown") +
+    scale_x_continuous(labels = function(x) x)
+  print(current_plot)
+  # Define file names based on the model name
+  png_file_name <- paste0(model_name, '.png')
+  pdf_file_name <- paste0(model_name, '.pdf')
+  
+  # Save the plot in PNG format
+  #ggsave(png_file_name, plot = current_plot, device = 'png', width = 8, height = 4, dpi = 300)
+
+  # Save the plot in PDF format
+  ggsave(pdf_file_name, plot = current_plot, device = 'pdf', width = 6, height = 6)
+
+
+}
+```
+# stats
+```{r}
+# summary of significance of smooth terms for age for final models
+# Extract model names from the list
+model_names <- names(models_age_list)
+
+# Extract significance information for each model
+sumtab <- sapply(model_names, function (x) {
+  model_gam <- models_age_list[[x]]$gam
+  summary(model_gam)$s.table
+})
+
+AIC_r2 <- sapply(model_names, function (x) {
+  model <- models_age_list[[x]]
+  # Extract AIC
+  aic_val <- summary(model$lme)$AIC
+  # Extract R^2 (Percent deviance explained)
+  r2_val <- summary(model$gam)$r.sq
+  
+  c(AIC = aic_val, R2 = r2_val)
+  
+})
+AIC_r2_df <- as.data.frame(t(AIC_r2))
+
+# Format the results
+rownames(sumtab) <- c('edf', 'Ref.df', 'F', 'p-value')
+sumtab <- as.data.frame(t(sumtab)) %>%
+  tibble::rownames_to_column(., 'model') %>%
+  select(-c('Ref.df'))
+sumtab <- cbind(sumtab, p.adjust(sumtab$`p-value`, method = 'fdr'))
+names(sumtab)[ncol(sumtab)] <- 'q-value'
+sumtab <- sumtab %>% 
+  mutate(survive_multcomp = ifelse(`q-value` < 0.05, 1, 0))
+AIC_r2_df$model <- rownames(AIC_r2_df)
+# Combine results
+combined_df <- merge(sumtab, AIC_r2_df, by = "model")
+
+# Save the results as a CSV
+# write.csv(combined_df, file = "FA_age_results.csv", row.names = FALSE)
+print(combined_df)
+```
+```{r}
+# summary of significance of smooth terms for mature for final models
+# Extract model names from the list
+model_names <- names(models_mat_list)
+
+# Extract significance information for each model
+sumtab <- sapply(model_names, function (x) {
+  model_gam <- models_mat_list[[x]]$gam
+  summary(model_gam)$s.table
+})
+
+AIC_r2 <- sapply(model_names, function (x) {
+  model <- models_mat_list[[x]]
+  # Extract AIC
+  aic_val <- summary(model$lme)$AIC
+  # Extract R^2 (Percent deviance explained)
+  r2_val <- summary(model$gam)$r.sq
+  
+  c(AIC = aic_val, R2 = r2_val)
+  
+})
+AIC_r2_df <- as.data.frame(t(AIC_r2))
+
+# Format the results
+rownames(sumtab) <- c('edf', 'Ref.df', 'F', 'p-value')
+sumtab <- as.data.frame(t(sumtab)) %>%
+  tibble::rownames_to_column(., 'model') %>%
+  select(-c('Ref.df'))
+sumtab <- cbind(sumtab, p.adjust(sumtab$`p-value`, method = 'fdr'))
+names(sumtab)[ncol(sumtab)] <- 'q-value'
+sumtab <- sumtab %>% 
+  mutate(survive_multcomp = ifelse(`q-value` < 0.05, 1, 0))
+AIC_r2_df$model <- rownames(AIC_r2_df)
+
+# Combine results
+combined_df <- merge(sumtab, AIC_r2_df, by = "model")
+
+# Save the results as a CSV
+# write.csv(combined_df, file = "FA_mat_results.csv", row.names = FALSE)
+print(combined_df)
+```
