@@ -7,6 +7,7 @@ import warnings
 
 from .representations import build_representations
 from .procrustes import procrustes_distance_matrix
+from .analysis import extract_entry_arrays
 
 
 def rates_to_psth(rates):
@@ -54,8 +55,7 @@ def _sliding_procrustes(psth, bc, ids, age_group, pair_fn,
             continue
 
         dist_t = procrustes_distance_matrix(entries_t)
-        me = np.array([e['monkey'] for e in entries_t])
-        ge = np.array([e['group'] for e in entries_t])
+        me, ge = extract_entry_arrays(entries_t)
         n = len(entries_t)
 
         pairs = pair_fn(dist_t, me, ge, n)

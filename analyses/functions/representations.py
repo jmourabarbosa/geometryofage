@@ -91,11 +91,11 @@ def build_representations(tuning, ids, groups, n_pcs, min_neurons=10, zscore=Tru
                 continue
 
             X = tuning[mask]
-            # Always remove NaN/inf and zero-variance rows
-            good = np.all(np.isfinite(X), axis=1) & (np.std(X, axis=1) > 0)
-            X = X[good]
             if zscore:
-                X = (X - X.mean(axis=1)[:, None]) / X.std(axis=1)[:, None]
+                X = zscore_neurons(X)
+            else:
+                good = np.all(np.isfinite(X), axis=1) & (np.std(X, axis=1) > 0)
+                X = X[good]
 
             if X.shape[0] < min_neurons:
                 continue
@@ -159,6 +159,9 @@ def build_window_entries(tuning, ids, neuron_age, n_pcs,
             center = mk_ages[idx].mean()
             if zscore:
                 X = zscore_neurons(X)
+            else:
+                good = np.all(np.isfinite(X), axis=1) & (np.std(X, axis=1) > 0)
+                X = X[good]
             if X.shape[0] < min_neurons:
                 continue
             matrix, var_exp = pca_reduce(X, n_pcs)

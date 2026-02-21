@@ -4,6 +4,10 @@ Plotting functions for Procrustes analysis pipeline.
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
+
+from .analysis import extract_entry_arrays
+from .decoding import knn_decode_age
 
 TASK_EVENTS = {
     'ODR 1.5s': {'Cue': 0, 'Delay': 500, 'Resp': 2000},
@@ -160,5 +164,114 @@ def plot_temporal_by_pair(temporal_pair_results, ci=95):
     ax.set_ylabel('Mean cross-age Procrustes distance')
     ax.set_title(f'Cross-age by pair over time ({ci}% CI)')
     ax.legend(fontsize=7, ncol=3)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_age_decoding(results, k=3):
+    """KNN age decoding scatter plot per task.
+
+    Parameters
+    ----------
+    results : dict
+        {task_name: {entries, dist, ...}} from the main pipeline.
+    k : int
+        Number of neighbors for KNN.
+    """
+    n_tasks = len(results)
+    fig, axes = plt.subplots(1, n_tasks, figsize=(5 * n_tasks, 4.5))
+    if n_tasks == 1:
+        axes = [axes]
+
+    for ax, (task_name, R) in zip(axes, results.items()):
+        entries = R['entries']
+        dist = R['dist']
+        monkeys, _ = extract_entry_arrays(entries)
+        monkey_names = sorted(set(monkeys))
+
+        dec = knn_decode_age(dist, entries, k=k)
+        y_true, y_pred = dec['y_true'], dec['y_pred_round']
+
+        # Color by monkey (LOO-monkey order matches monkey_names iteration)
+        mk_ids = []
+        for test_mk in monkey_names:
+            mk_ids.extend([test_mk] * np.sum(monkeys == test_mk))
+        mk_ids = np.array(mk_ids)
+
+        cmap = {m: f'C{i}' for i, m in enumerate(monkey_names)}
+        colors = [cmap[m] for m in mk_ids]
+
+        # Jitter for visibility
+        rng = np.random.default_rng(0)
+        jx = rng.uniform(-0.15, 0.15, len(y_true))
+        jy = rng.uniform(-0.15, 0.15, len(y_true))
+        ax.scatter(y_true + jx, y_pred + jy, c=colors, s=40,
+                   edgecolors='k', linewidths=0.5)
+
+        ticks = sorted(set(y_true))
+        ax.plot([ticks[0] - 0.3, ticks[-1] + 0.3],
+                [ticks[0] - 0.3, ticks[-1] + 0.3], 'k--', lw=1, alpha=0.5)
+        ax.set_xlabel('True age group')
+        ax.set_ylabel('Predicted age group (KNN, LOO-monkey)')
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_title(f'{task_name}\nacc={dec["exact_acc"]:.2f}, '
+                     f'\u00b11 acc={dec["pm1_acc"]:.2f}')
+
+        for m in monkey_names:
+            ax.scatter([], [], c=cmap[m], label=m, edgecolors='k', linewidths=0.5)
+        ax.legend(fontsize=6, ncol=2)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_correlation_panels(scatter_data, xlabel, ylabel,
+                            suptitle=None, color_by_monkey=False):
+    """Generic scatter + Pearson r panel plot for behavioral correlations.
+
+    Parameters
+    ----------
+    scatter_data : dict
+        {task_name: {x, y, labels, [colors], [monkey_names]}}
+    xlabel, ylabel : str
+    suptitle : str, optional
+    color_by_monkey : bool
+        If True, use per-point colors and add a monkey legend.
+    """
+    n_tasks = len(scatter_data)
+    fig, axes = plt.subplots(1, n_tasks, figsize=(5 * n_tasks, 4.5))
+    if n_tasks == 1:
+        axes = [axes]
+
+    for ax, (task_name, S) in zip(axes, scatter_data.items()):
+        x, y = S['x'], S['y']
+        if len(x) <= 2:
+            ax.set_title(f'{task_name}\nnot enough data')
+            continue
+
+        r, p = pearsonr(x, y)
+
+        if color_by_monkey and 'colors' in S:
+            ax.scatter(x, y, c=S['colors'], s=50,
+                       edgecolors='k', linewidths=0.5)
+            if 'monkey_names' in S:
+                cmap = {m: f'C{i}' for i, m in enumerate(S['monkey_names'])}
+                for m in S['monkey_names']:
+                    ax.scatter([], [], c=cmap[m], label=m,
+                               edgecolors='k', linewidths=0.5)
+                ax.legend(fontsize=6, ncol=2)
+        else:
+            ax.scatter(x, y, s=40, edgecolors='k', linewidths=0.5)
+
+        for k, lbl in enumerate(S.get('labels', [])):
+            ax.annotate(lbl, (x[k], y[k]), fontsize=5, alpha=0.7)
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(f'{task_name}\nr={r:.2f}, p={p:.3f}, n={len(x)}')
+
+    if suptitle:
+        plt.suptitle(suptitle, y=1.02)
     plt.tight_layout()
     plt.show()
