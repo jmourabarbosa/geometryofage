@@ -226,18 +226,15 @@ def plot_age_decoding(results, k=3):
     plt.show()
 
 
-def plot_correlation_panels(scatter_data, xlabel, ylabel,
-                            suptitle=None, color_by_monkey=False):
+def plot_correlation_panels(scatter_data, xlabel, ylabel, suptitle=None):
     """Generic scatter + Pearson r panel plot for behavioral correlations.
 
     Parameters
     ----------
     scatter_data : dict
-        {task_name: {x, y, labels, [colors], [monkey_names]}}
+        {task_name: {x, y, labels}}
     xlabel, ylabel : str
     suptitle : str, optional
-    color_by_monkey : bool
-        If True, use per-point colors and add a monkey legend.
     """
     n_tasks = len(scatter_data)
     fig, axes = plt.subplots(1, n_tasks, figsize=(5 * n_tasks, 4.5))
@@ -251,18 +248,7 @@ def plot_correlation_panels(scatter_data, xlabel, ylabel,
             continue
 
         r, p = pearsonr(x, y)
-
-        if color_by_monkey and 'colors' in S:
-            ax.scatter(x, y, c=S['colors'], s=50,
-                       edgecolors='k', linewidths=0.5)
-            if 'monkey_names' in S:
-                cmap = {m: f'C{i}' for i, m in enumerate(S['monkey_names'])}
-                for m in S['monkey_names']:
-                    ax.scatter([], [], c=cmap[m], label=m,
-                               edgecolors='k', linewidths=0.5)
-                ax.legend(fontsize=6, ncol=2)
-        else:
-            ax.scatter(x, y, s=40, edgecolors='k', linewidths=0.5)
+        ax.scatter(x, y, s=40, edgecolors='k', linewidths=0.5)
 
         for k, lbl in enumerate(S.get('labels', [])):
             ax.annotate(lbl, (x[k], y[k]), fontsize=5, alpha=0.7)

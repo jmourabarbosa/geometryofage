@@ -620,17 +620,3 @@ class TestPlotCorrelationPanels:
         }
         plot_correlation_panels(scatter, "x label", "y label", suptitle="test")
         plt.close("all")
-
-    def test_color_by_monkey(self):
-        import matplotlib.pyplot as plt
-        scatter = {
-            "ODR 1.5s": dict(
-                x=np.array([1, 2, 3, 4.0]),
-                y=np.array([0.1, 0.2, 0.3, 0.4]),
-                labels=["A G0", "A G1", "B G0", "B G1"],
-                colors=["C0", "C0", "C1", "C1"],
-                monkey_names=["A", "B"],
-            ),
-        }
-        plot_correlation_panels(scatter, "x", "y", color_by_monkey=True)
-        plt.close("all")
