@@ -2,6 +2,8 @@
 Cross-task geometry comparison via split-half cross-validation.
 """
 
+from itertools import combinations
+
 import numpy as np
 from scipy import stats
 
@@ -46,10 +48,12 @@ def cross_task_cv(tuning_flat, task_ids, n_pcs, min_neurons,
     dict with keys: cat_means, mantel_r, last_dist, last_labels, cat_names, n_iter
     """
     task_names = list(task_ids.keys())
+    task_pairs = list(combinations(range(len(task_names)), 2))
     rng = np.random.default_rng(seed)
 
     iter_cat_means = {c: [] for c in CAT_NAMES}
-    iter_mantel_r = []
+    iter_mantel_r = {(task_names[i], task_names[j]): []
+                     for i, j in task_pairs}
     last_dist = None
     last_labels = None
 
@@ -91,9 +95,9 @@ def cross_task_cv(tuning_flat, task_ids, n_pcs, min_neurons,
                     cats[CAT_NAMES[3]].append(d)
 
         for c in CAT_NAMES:
-            iter_cat_means[c].append(np.mean(cats[c]))
+            iter_cat_means[c].append(np.nanmean(cats[c]))
 
-        # Mantel: correlate within-task distances (split 0) across tasks
+        # Mantel: correlate within-task distances (split 0) across task pairs
         split0 = {}
         for tname in task_names:
             idx = [k for k, m in enumerate(entry_meta)
@@ -102,23 +106,25 @@ def cross_task_cv(tuning_flat, task_ids, n_pcs, min_neurons,
             sub = dist[np.ix_(idx, idx)]
             split0[tname] = (monkeys, sub)
 
-        mk_a, d_a = split0[task_names[0]]
-        mk_b, d_b = split0[task_names[1]]
-        common = sorted(set(mk_a) & set(mk_b))
-        if len(common) >= 3:
-            ia = [mk_a.index(m) for m in common]
-            ib = [mk_b.index(m) for m in common]
-            va = [d_a[ia[x], ia[y]]
-                  for x in range(len(common))
-                  for y in range(x + 1, len(common))]
-            vb = [d_b[ib[x], ib[y]]
-                  for x in range(len(common))
-                  for y in range(x + 1, len(common))]
-            r, _ = stats.pearsonr(va, vb)
-            iter_mantel_r.append(r)
+        for ti, tj in task_pairs:
+            ta, tb = task_names[ti], task_names[tj]
+            mk_a, d_a = split0[ta]
+            mk_b, d_b = split0[tb]
+            common = sorted(set(mk_a) & set(mk_b))
+            if len(common) >= 3:
+                ia = [mk_a.index(m) for m in common]
+                ib = [mk_b.index(m) for m in common]
+                va = [d_a[ia[x], ia[y]]
+                      for x in range(len(common))
+                      for y in range(x + 1, len(common))]
+                vb = [d_b[ib[x], ib[y]]
+                      for x in range(len(common))
+                      for y in range(x + 1, len(common))]
+                r, _ = stats.pearsonr(va, vb)
+                iter_mantel_r[(ta, tb)].append(r)
 
         last_dist = dist
-        last_labels = [f"{m[0]}_{m[1].split()[1]}_{chr(65 + m[2])}"
+        last_labels = [f"{m[0]}_{m[1].split()[-1]}_{chr(65 + m[2])}"
                        for m in entry_meta]
 
         if (it + 1) % 25 == 0:
@@ -127,7 +133,7 @@ def cross_task_cv(tuning_flat, task_ids, n_pcs, min_neurons,
     print('Done.')
     return dict(
         cat_means={c: np.array(v) for c, v in iter_cat_means.items()},
-        mantel_r=np.array(iter_mantel_r),
+        mantel_r={k: np.array(v) for k, v in iter_mantel_r.items()},
         last_dist=last_dist,
         last_labels=last_labels,
         cat_names=CAT_NAMES,

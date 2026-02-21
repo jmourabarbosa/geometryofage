@@ -44,7 +44,7 @@ def _mean_within_monkey(me, dist):
         if len(idx) < 2:
             mean_within[mid] = np.nan
             continue
-        mean_within[mid] = np.mean([dist[i, j] for i in idx for j in idx if j > i])
+        mean_within[mid] = np.nanmean([dist[i, j] for i in idx for j in idx if j > i])
     return mean_within
 
 
@@ -68,14 +68,23 @@ def _quantile_bin(values, n_groups, edges=None):
     return np.clip(np.digitize(values, edges[1:-1]), 0, n_groups - 1), edges
 
 
-def assign_age_groups(ids, abs_age, n_age_groups):
-    """Assign neurons to age groups per monkey based on quantiles."""
-    monkey_names = sorted(set(ids))
-    age_group = np.zeros(len(ids), dtype=int)
-    for mid in monkey_names:
-        mask = ids == mid
-        age_group[mask], _ = _quantile_bin(abs_age[mask], n_age_groups)
-    return age_group
+def assign_age_groups(age, edges):
+    """Assign neurons to age groups using fixed bin edges.
+
+    Parameters
+    ----------
+    age : ndarray
+        Age per neuron (e.g. absolute age in months).
+    edges : sequence of float
+        Inner bin edges. For 3 groups [before, during, after] pass
+        two values, e.g. ``(48, 60)``: group 0 = age < 48,
+        group 1 = 48 <= age < 60, group 2 = age >= 60.
+
+    Returns
+    -------
+    age_group : ndarray of int
+    """
+    return np.digitize(age, edges)
 
 
 def cross_monkey_analysis(entries, dist):
@@ -104,13 +113,191 @@ def cross_monkey_analysis(entries, dist):
     within_all = np.array(
         [dist[i, j] for i in range(n) for j in range(i + 1, n) if me[i] == me[j]]
     )
-    t_stat, p_val = sts.ttest_1samp(cross_adj, 0)
+    t_stat, p_val = sts.ttest_1samp(cross_adj, 0, nan_policy='omit')
 
     return dict(
         cross_raw=cross_raw, cross_adj=cross_adj,
         mean_within=mean_within, within_all_pairs=within_all,
         t_stat=t_stat, p_val=p_val, monkey_names=monkey_names,
     )
+
+
+def cross_monkey_by_age(tuning, ids, age, n_pcs, min_neurons,
+                        window_months=6, step_months=2, zscore=True):
+    """Per-pair cross-monkey Procrustes distance in sliding age windows.
+
+    Two-pass approach:
+      1. Find which monkeys have enough neurons in *every* window.
+      2. Restrict to those common monkeys and compute per-pair distances.
+
+    Because only common monkeys are used, every pair has a value in every
+    window (no NaNs — lines are continuous).
+
+    Parameters
+    ----------
+    tuning : ndarray, shape (n_neurons, n_features)
+    ids : ndarray of str
+    age : ndarray, age in months (e.g. absolute chronological age)
+    n_pcs, min_neurons : int
+    window_months, step_months : float
+    zscore : bool
+
+    Returns
+    -------
+    centers : ndarray, window center ages
+    pair_dist : dict  {(monkey_a, monkey_b): ndarray}
+        One distance per window, aligned with *centers*.
+    n_neurons : ndarray, total (common-monkey) neurons per window
+    common_monkeys : list of str
+    """
+    from itertools import combinations
+    from .representations import build_representations
+    from .procrustes import procrustes_distance_matrix
+
+    half = window_months / 2
+    starts = np.arange(age.min(),
+                       age.max() - window_months + step_months,
+                       step_months)
+
+    # --- Pass 1: find monkeys that survive build_representations in every window ---
+    window_monkeys = []
+    valid_starts = []
+    for t0 in starts:
+        mask = (age >= t0) & (age < t0 + window_months)
+        if mask.sum() < min_neurons:
+            continue
+        groups = np.zeros(mask.sum(), dtype=int)
+        entries = build_representations(tuning[mask], ids[mask], groups,
+                                        n_pcs=n_pcs, min_neurons=min_neurons,
+                                        zscore=zscore)
+        if len(entries) < 2:
+            continue
+        me, _ = extract_entry_arrays(entries)
+        window_monkeys.append(set(me))
+        valid_starts.append(t0)
+
+    if len(window_monkeys) == 0:
+        return np.array([]), {}, np.array([]), []
+
+    common = sorted(set.intersection(*window_monkeys))
+    if len(common) < 2:
+        return np.array([]), {}, np.array([]), []
+
+    # --- Pass 2: compute per-pair distances using only common monkeys ---
+    pairs = list(combinations(common, 2))
+    pair_dist = {p: [] for p in pairs}
+    centers_list, nn_list = [], []
+
+    for t0 in valid_starts:
+        mask = (age >= t0) & (age < t0 + window_months)
+        common_mask = mask & np.isin(ids, common)
+
+        groups = np.zeros(common_mask.sum(), dtype=int)
+        entries = build_representations(tuning[common_mask], ids[common_mask],
+                                        groups, n_pcs=n_pcs,
+                                        min_neurons=min_neurons, zscore=zscore)
+        me, _ = extract_entry_arrays(entries)
+        present = set(me)
+
+        # skip window if a common monkey dropped out after zscore cleaning
+        if not set(common).issubset(present):
+            continue
+
+        dist = procrustes_distance_matrix(entries)
+        for pa, pb in pairs:
+            ia = np.where(me == pa)[0][0]
+            ib = np.where(me == pb)[0][0]
+            pair_dist[(pa, pb)].append(dist[ia, ib])
+
+        centers_list.append(t0 + half)
+        nn_list.append(common_mask.sum())
+
+    for p in pairs:
+        pair_dist[p] = np.array(pair_dist[p])
+
+    return (np.array(centers_list), pair_dist,
+            np.array(nn_list), common)
+
+
+def cross_monkey_by_group(task_data, psth_data, age_groups, n_pcs, min_neurons,
+                          group_labels):
+    """Cross-monkey Procrustes distance per age group with linear regression.
+
+    Only uses monkeys with >= min_neurons in every age group.
+
+    Parameters
+    ----------
+    task_data : dict
+        {task_name: dict(ids=..., abs_age=...)}
+    psth_data : dict
+        {task_name: dict(flat=...)}
+    age_groups : dict
+        {task_name: ndarray of int}
+    n_pcs, min_neurons : int
+    group_labels : list of str
+
+    Returns
+    -------
+    results : dict
+        {task_name: dict(group_dists, slope, intercept, r, p, se, common)}
+        group_dists is {group_idx: ndarray of distances}.
+    pooled : dict
+        Pooled regression across all tasks: {slope, intercept, r, p, se}.
+    """
+    from .representations import build_representations
+    from .procrustes import procrustes_distance_matrix
+
+    n_groups = len(group_labels)
+    results = {}
+    pooled_groups, pooled_dists = [], []
+
+    for task_name in task_data:
+        ids = task_data[task_name]['ids']
+        tuning = psth_data[task_name]['flat']
+        ag = age_groups[task_name]
+
+        monkeys = sorted(set(ids))
+        common = [mid for mid in monkeys
+                  if all(np.sum((ids == mid) & (ag == g)) >= min_neurons
+                         for g in range(n_groups))]
+
+        mask = np.isin(ids, common)
+        entries = build_representations(tuning[mask], ids[mask], ag[mask],
+                                        n_pcs=n_pcs, min_neurons=min_neurons,
+                                        zscore=True)
+        dist = procrustes_distance_matrix(entries)
+        me, ge = extract_entry_arrays(entries)
+        n = len(entries)
+
+        group_dists = {}
+        all_g, all_d = [], []
+        for g in range(n_groups):
+            dists = np.array([dist[i, j] for i in range(n) for j in range(i + 1, n)
+                              if me[i] != me[j] and ge[i] == g and ge[j] == g])
+            group_dists[g] = dists
+            all_g.extend([g] * len(dists))
+            all_d.extend(dists)
+
+        all_g = np.array(all_g)
+        all_d = np.array(all_d)
+        slope, intercept, r, p, se = sts.linregress(all_g, all_d)
+
+        pooled_groups.append(all_g)
+        pooled_dists.append(all_d)
+
+        results[task_name] = dict(
+            group_dists=group_dists, slope=slope, intercept=intercept,
+            r=r, p=p, se=se, common=common,
+            n_monkeys=len(monkeys), n_neurons=mask.sum(),
+            n_total=len(ids),
+        )
+
+    pg = np.concatenate(pooled_groups)
+    pd = np.concatenate(pooled_dists)
+    s_all, i_all, r_all, p_all, se_all = sts.linregress(pg, pd)
+    pooled = dict(slope=s_all, intercept=i_all, r=r_all, p=p_all, se=se_all)
+
+    return results, pooled
 
 
 def cross_age_analysis(entries, dist):
@@ -137,7 +324,7 @@ def cross_age_analysis(entries, dist):
     same_age_raw = np.array(same_age_raw)
     same_age_adj = np.array(same_age_adj)
     diff_age_raw = np.array(diff_age_raw)
-    t_stat, p_val = sts.ttest_1samp(same_age_adj, 0)
+    t_stat, p_val = sts.ttest_1samp(same_age_adj, 0, nan_policy='omit')
 
     return dict(
         same_age_raw=same_age_raw, same_age_adj=same_age_adj,
@@ -146,140 +333,3 @@ def cross_age_analysis(entries, dist):
     )
 
 
-# ── Behavioral performance helpers ──────────────────────────────────────────
-
-def load_behavioral_perf(beh_odr_path, beh_odrd_path, task_metadata, n_age_groups):
-    """Load behavioral performance CSVs and bin into age groups matching neural data.
-
-    Parameters
-    ----------
-    beh_odr_path : str
-        Path to ODR behavioral CSV.
-    beh_odrd_path : str
-        Path to ODRd behavioral CSV.
-    task_metadata : dict
-        {task_name: (ids, abs_age)} — neural IDs and absolute ages per task.
-    n_age_groups : int
-
-    Returns
-    -------
-    perf_by_entry : dict
-        {(task_name, monkey, group): mean_percorr}
-    """
-    import pandas as pd
-
-    beh_odr = pd.read_csv(beh_odr_path)
-    beh_odrd = pd.read_csv(beh_odrd_path)
-    beh_odr['abs_age_months'] = beh_odr['age'] / 365.0 * 12.0
-    beh_odrd['abs_age_months'] = beh_odrd['age'] / 365.0 * 12.0
-
-    beh_by_task = {
-        'ODR 1.5s': beh_odr[beh_odr['Task'] == 'ODR'],
-        'ODR 3.0s': beh_odr[beh_odr['Task'] == 'ODR3'],
-        'ODRd':     beh_odrd,
-    }
-
-    perf_by_entry = {}
-    for task_name, (neural_ids, neural_abs_age) in task_metadata.items():
-        beh_df = beh_by_task.get(task_name)
-        if beh_df is None:
-            continue
-        for mid in sorted(set(neural_ids)):
-            neural_ages_mk = neural_abs_age[neural_ids == mid]
-            _, edges = _quantile_bin(neural_ages_mk, n_age_groups)
-            beh_mk = beh_df[beh_df['Monkey'] == mid].copy()
-            if len(beh_mk) == 0:
-                continue
-            beh_mk['group'], _ = _quantile_bin(
-                beh_mk['abs_age_months'].values, n_age_groups, edges=edges,
-            )
-            for g in range(n_age_groups):
-                sessions = beh_mk[beh_mk['group'] == g]
-                if len(sessions) > 0:
-                    perf_by_entry[(task_name, mid, g)] = sessions['percorr'].mean()
-
-    return perf_by_entry
-
-
-def perf_vs_within_monkey_pairs(results, perf_by_entry):
-    """Within-monkey cross-age pairs: Procrustes distance vs |Δ performance|.
-
-    Parameters
-    ----------
-    results : dict
-        {task_name: {entries, dist, ...}}
-    perf_by_entry : dict
-        {(task_name, monkey, group): mean_percorr}
-
-    Returns
-    -------
-    scatter : dict
-        {task_name: {x, y, labels}} where x=|Δ perf|, y=Procrustes distance.
-    """
-    scatter = {}
-    for task_name, R in results.items():
-        me, ge = extract_entry_arrays(R['entries'])
-        dist = R['dist']
-        n = len(me)
-
-        x, y, labels = [], [], []
-        for i in range(n):
-            for j in range(i + 1, n):
-                if me[i] != me[j]:
-                    continue
-                pi = perf_by_entry.get((task_name, me[i], ge[i]))
-                pj = perf_by_entry.get((task_name, me[j], ge[j]))
-                if pi is None or pj is None:
-                    continue
-                x.append(abs(pi - pj))
-                y.append(dist[i, j])
-                labels.append(f'{me[i]} G{ge[i]}-G{ge[j]}')
-
-        scatter[task_name] = dict(x=np.array(x), y=np.array(y), labels=labels)
-    return scatter
-
-
-def perf_vs_cross_monkey(results, perf_by_entry, n_age_groups):
-    """Cross-monkey distance (mean over age) vs |Δ mean performance|.
-
-    Parameters
-    ----------
-    results : dict
-    perf_by_entry : dict
-    n_age_groups : int
-
-    Returns
-    -------
-    scatter : dict
-        {task_name: {x, y, labels}}
-    """
-    scatter = {}
-    for task_name, R in results.items():
-        me, _ = extract_entry_arrays(R['entries'])
-        dist = R['dist']
-        monkey_names = sorted(set(me))
-
-        mean_perf = {}
-        for mid in monkey_names:
-            perfs = [perf_by_entry[(task_name, mid, g)]
-                     for g in range(n_age_groups)
-                     if (task_name, mid, g) in perf_by_entry]
-            if perfs:
-                mean_perf[mid] = np.mean(perfs)
-
-        x, y, labels = [], [], []
-        for ia, ma in enumerate(monkey_names):
-            for mb in monkey_names[ia + 1:]:
-                if ma not in mean_perf or mb not in mean_perf:
-                    continue
-                idx_a = np.where(me == ma)[0]
-                idx_b = np.where(me == mb)[0]
-                pair_dists = [dist[i, j] for i in idx_a for j in idx_b]
-                if len(pair_dists) == 0:
-                    continue
-                x.append(abs(mean_perf[ma] - mean_perf[mb]))
-                y.append(np.mean(pair_dists))
-                labels.append(f'{ma}-{mb}')
-
-        scatter[task_name] = dict(x=np.array(x), y=np.array(y), labels=labels)
-    return scatter

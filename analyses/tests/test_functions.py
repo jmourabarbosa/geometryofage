@@ -12,15 +12,14 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from functions.representations import (zscore_neurons, pca_reduce, build_representations,
-                                       build_window_entries, _clean_neurons, _build_entry)
+                                       _clean_neurons, _build_entry)
 from functions.procrustes import procrustes_distance_matrix
 from functions.analysis import (assign_age_groups, cross_monkey_analysis, cross_age_analysis,
                                 extract_entry_arrays, _mean_within_monkey, _quantile_bin)
-from functions.decoding import knn_decode_monkey, knn_decode_age, regress_age, _knn_loo_predict
-from functions.temporal import rates_to_psth, temporal_cross_monkey, temporal_cross_age, temporal_cross_age_by_pair
+from functions.temporal import rates_to_psth, temporal_cross_monkey, temporal_cross_age
 from functions.plotting import (_baseline_normalize, plot_cross_monkey, plot_distance_matrices,
-                                plot_cross_age, plot_temporal, plot_temporal_by_pair,
-                                plot_age_decoding, plot_correlation_panels, plot_cross_task)
+                                plot_cross_age, plot_temporal,
+                                plot_cross_task)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -138,28 +137,6 @@ class TestBuildRepresentations:
         assert len(entries) == 1
 
 
-class TestBuildWindowEntries:
-    def test_basic(self):
-        rng = np.random.default_rng(42)
-        n = 200
-        tuning = rng.standard_normal((n, 16))
-        ids = np.array(["A"] * 100 + ["B"] * 100)
-        ages = np.concatenate([np.linspace(100, 500, 100), np.linspace(100, 500, 100)])
-        entries = build_window_entries(tuning, ids, ages, n_pcs=4, n_windows=5, min_neurons=10)
-        assert len(entries) > 0
-        assert all("center_days" in e for e in entries)
-        # Each monkey should contribute windows
-        mk_set = set(e["monkey"] for e in entries)
-        assert mk_set == {"A", "B"}
-
-    def test_too_few_neurons(self):
-        rng = np.random.default_rng(42)
-        tuning = rng.standard_normal((5, 8))
-        ids = np.array(["A"] * 5)
-        ages = np.linspace(100, 200, 5)
-        entries = build_window_entries(tuning, ids, ages, n_pcs=4, n_windows=3, min_neurons=10)
-        assert len(entries) == 0
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # procrustes.py
@@ -201,27 +178,22 @@ class TestProcrustesDistanceMatrix:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestAssignAgeGroups:
-    def test_correct_n_groups(self):
-        ids = np.array(["A"] * 30 + ["B"] * 30)
-        ages = np.concatenate([np.linspace(100, 300, 30), np.linspace(100, 300, 30)])
-        groups = assign_age_groups(ids, ages, 3)
-        assert set(groups) == {0, 1, 2}
+    def test_three_groups(self):
+        ages = np.array([-10, -5, 0, 5, 10], dtype=float)
+        groups = assign_age_groups(ages, (-3, 3))
+        # 0 is in 'during' (bin 1), 5 is >= 3 so 'after' (bin 2)
+        np.testing.assert_array_equal(groups, [0, 0, 1, 2, 2])
 
-    def test_per_monkey_independent(self):
-        ids = np.array(["A"] * 20 + ["B"] * 20)
-        ages_A = np.linspace(100, 200, 20)
-        ages_B = np.linspace(500, 600, 20)  # Different age range
-        ages = np.concatenate([ages_A, ages_B])
-        groups = assign_age_groups(ids, ages, 2)
-        # Both monkeys should have both groups even though age ranges differ
-        assert set(groups[:20]) == {0, 1}
-        assert set(groups[20:]) == {0, 1}
+    def test_two_groups(self):
+        ages = np.array([-10, -1, 0, 5], dtype=float)
+        groups = assign_age_groups(ages, (0,))
+        np.testing.assert_array_equal(groups, [0, 0, 1, 1])
 
-    def test_single_group(self):
-        ids = np.array(["A"] * 10)
-        ages = np.linspace(100, 200, 10)
-        groups = assign_age_groups(ids, ages, 1)
-        assert np.all(groups == 0)
+    def test_missing_group_ok(self):
+        # All values above both edges -> all in group 2
+        ages = np.array([10, 20, 30], dtype=float)
+        groups = assign_age_groups(ages, (-6, 6))
+        np.testing.assert_array_equal(groups, [2, 2, 2])
 
 
 class TestCrossMonkeyAnalysis:
@@ -263,70 +235,6 @@ class TestCrossAgeAnalysis:
         assert len(result["same_age_raw"]) > 0
         assert len(result["diff_age_raw"]) > 0
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# decoding.py
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestKnnDecodeMonkey:
-    def test_output_types(self):
-        entries = _make_entries(n_monkeys=3, n_groups=3)
-        dist = procrustes_distance_matrix(entries)
-        acc, y_true, y_pred = knn_decode_monkey(dist, entries, k=1)
-        assert isinstance(acc, float)
-        assert 0 <= acc <= 1
-        assert len(y_true) == len(y_pred)
-
-    def test_perfect_decoding_with_zero_within(self):
-        """If within-monkey distances are 0 and cross are large, accuracy should be high."""
-        rng = np.random.default_rng(99)
-        entries = []
-        for g in range(3):
-            for mi, mid in enumerate(["A", "B"]):
-                # Same base matrix per monkey, different across monkeys
-                base = rng.standard_normal((4, 8)) if g == 0 else entries[mi]["matrix"]
-                entries.append({"monkey": mid, "group": g,
-                                "matrix": base.copy(), "n_neurons": 50, "var_explained": 0.5})
-        dist = procrustes_distance_matrix(entries)
-        acc, _, _ = knn_decode_monkey(dist, entries, k=1)
-        assert acc == 1.0
-
-
-class TestKnnDecodeAge:
-    def test_output_keys(self):
-        entries = _make_entries(n_monkeys=3, n_groups=3)
-        dist = procrustes_distance_matrix(entries)
-        result = knn_decode_age(dist, entries, k=1)
-        expected_keys = {"y_true", "y_pred", "y_pred_round",
-                         "exact_acc", "pm1_acc", "pm2_acc"}
-        assert set(result.keys()) == expected_keys
-
-    def test_accuracy_bounds(self):
-        entries = _make_entries(n_monkeys=3, n_groups=3)
-        dist = procrustes_distance_matrix(entries)
-        result = knn_decode_age(dist, entries, k=1)
-        assert 0 <= result["exact_acc"] <= 1
-        assert result["pm1_acc"] >= result["exact_acc"]
-        assert result["pm2_acc"] >= result["pm1_acc"]
-
-
-class TestRegressAge:
-    def test_output_keys(self):
-        entries = _make_entries(n_monkeys=3, n_groups=3)
-        dist = procrustes_distance_matrix(entries)
-        ages = np.array([e["group"] * 100 + 50 for e in entries], dtype=float)
-        result = regress_age(dist, entries, ages, k=2)
-        expected_keys = {"y_true", "y_pred", "monkey_ids", "r", "p", "mae"}
-        assert set(result.keys()) == expected_keys
-
-    def test_age_normalization(self):
-        entries = _make_entries(n_monkeys=2, n_groups=3)
-        dist = procrustes_distance_matrix(entries)
-        ages = np.array([e["group"] * 100 + 50 for e in entries], dtype=float)
-        result = regress_age(dist, entries, ages, k=2)
-        # y_true should be in [0, 1] since normalized within each monkey
-        assert np.all(result["y_true"] >= 0)
-        assert np.all(result["y_true"] <= 1)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -393,8 +301,7 @@ class TestTemporalCrossMonkey:
         psth = rng.standard_normal((n_neurons, n_conds, n_bins))
         bc = np.linspace(-500, 2500, n_bins)
         ids = np.array(["A"] * 35 + ["B"] * 35 + ["C"] * 30)
-        age_group = np.array([0] * 35 + [0] * 35 + [0] * 30)
-        t, boots = temporal_cross_monkey(psth, bc, ids, age_group,
+        t, boots = temporal_cross_monkey(psth, bc, ids,
                                           n_pcs=4, min_neurons=10,
                                           window_ms=500, step_ms=200, n_boot=10)
         assert len(t) > 0
@@ -420,25 +327,6 @@ class TestTemporalCrossAge:
         assert len(t) > 0
         assert boots.shape[0] == 10
 
-
-class TestTemporalCrossAgeByPair:
-    def test_basic(self):
-        rng = np.random.default_rng(42)
-        n_neurons = 120
-        n_conds = 8
-        n_bins = 40
-        psth = rng.standard_normal((n_neurons, n_conds, n_bins))
-        bc = np.linspace(-500, 2500, n_bins)
-        ids = np.array(["A"] * 60 + ["B"] * 60)
-        age_group = np.array([0] * 20 + [1] * 20 + [2] * 20 +
-                             [0] * 20 + [1] * 20 + [2] * 20)
-        age_pairs = [(0, 1), (1, 2), (0, 2)]
-        t, boots_dict = temporal_cross_age_by_pair(
-            psth, bc, ids, age_group, age_pairs,
-            n_pcs=4, min_neurons=10,
-            window_ms=500, step_ms=200, n_boot=10)
-        assert len(t) > 0
-        assert isinstance(boots_dict, dict)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -519,22 +407,6 @@ class TestPlotTemporal:
         plt.close("all")
 
 
-class TestPlotTemporalByPair:
-    def test_smoke(self):
-        import matplotlib.pyplot as plt
-        rng = np.random.default_rng(0)
-        t = np.linspace(-500, 2500, 30)
-        boots_by_pair = {
-            (0, 1): rng.standard_normal((10, 30)),
-            (1, 2): rng.standard_normal((10, 30)),
-            (0, 2): rng.standard_normal((10, 30)),
-        }
-        temporal_pair_results = {
-            "ODR 1.5s": {"t": t, "boots_by_pair": boots_by_pair}
-        }
-        plot_temporal_by_pair(temporal_pair_results)
-        plt.close("all")
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # New helpers
@@ -574,38 +446,6 @@ class TestMeanWithinMonkey:
         assert np.isnan(mean_w["M0"])
         assert np.isnan(mean_w["M1"])
 
-
-class TestKnnLooPredict:
-    def test_classification(self):
-        from collections import Counter
-        entries = _make_entries(n_monkeys=3, n_groups=3)
-        dist = procrustes_distance_matrix(entries)
-        monkeys, groups = extract_entry_arrays(entries)
-        agg = lambda x: Counter(x).most_common(1)[0][0]
-        y_true, y_pred, split_ids = _knn_loo_predict(dist, monkeys, groups, k=1, agg_fn=agg)
-        assert len(y_true) == len(y_pred) == len(split_ids)
-        assert len(y_true) == len(entries)
-
-    def test_regression(self):
-        entries = _make_entries(n_monkeys=3, n_groups=3)
-        dist = procrustes_distance_matrix(entries)
-        monkeys, groups = extract_entry_arrays(entries)
-        y_true, y_pred, split_ids = _knn_loo_predict(
-            dist, groups.astype(float), monkeys, k=1, agg_fn=np.mean)
-        assert len(y_true) == len(entries)
-        assert all(isinstance(v, (float, np.floating)) for v in y_pred)
-
-
-class TestPlotAgeDecoding:
-    def test_smoke(self):
-        import matplotlib.pyplot as plt
-        e1, d1, e2, d2 = _two_task_entries()
-        results = {
-            "ODR 1.5s": {"entries": e1, "dist": d1},
-            "ODR 3.0s": {"entries": e2, "dist": d2},
-        }
-        plot_age_decoding(results, k=1)
-        plt.close("all")
 
 
 class TestComputeFlatTuning:
@@ -654,12 +494,38 @@ class TestCrossTaskCv:
         assert 'cat_names' in results
         assert 'n_iter' in results
 
+        # mantel_r is a dict keyed by task-pair tuples
+        assert isinstance(results['mantel_r'], dict)
+        assert ('Task A', 'Task B') in results['mantel_r']
+        assert len(results['mantel_r'][('Task A', 'Task B')]) == 3
+
         # Check iteration count
         for c in results['cat_names']:
             assert len(results['cat_means'][c]) == 3
 
         # Check category names
         assert len(results['cat_names']) == 4
+
+    def test_three_tasks(self):
+        from functions.cross_task import cross_task_cv
+
+        rng = np.random.default_rng(0)
+        n = 60
+        tuning_flat = {
+            'Task A': rng.standard_normal((n, 8)),
+            'Task B': rng.standard_normal((n, 8)),
+            'Task C': rng.standard_normal((n, 8)),
+        }
+        ids = np.array(['M0'] * 20 + ['M1'] * 20 + ['M2'] * 20)
+        task_ids = {t: ids.copy() for t in tuning_flat}
+        results = cross_task_cv(tuning_flat, task_ids,
+                                n_pcs=4, min_neurons=5, n_iter=3, seed=0)
+
+        # Should have 3 pairs
+        assert len(results['mantel_r']) == 3
+        expected_pairs = {('Task A', 'Task B'), ('Task A', 'Task C'),
+                          ('Task B', 'Task C')}
+        assert set(results['mantel_r'].keys()) == expected_pairs
 
 
 class TestPlotCrossTask:
@@ -671,7 +537,7 @@ class TestPlotCrossTask:
         n_iter = 5
         results = {
             'cat_means': {c: rng.uniform(0.1, 0.5, n_iter) for c in CAT_NAMES},
-            'mantel_r': rng.uniform(0.5, 0.9, n_iter),
+            'mantel_r': {('Task A', 'Task B'): rng.uniform(0.5, 0.9, n_iter)},
             'last_dist': rng.uniform(0, 1, (6, 6)),
             'last_labels': [f'M{i}' for i in range(6)],
             'cat_names': CAT_NAMES,
@@ -680,19 +546,25 @@ class TestPlotCrossTask:
         plot_cross_task(results)
         plt.close("all")
 
-
-class TestPlotCorrelationPanels:
-    def test_smoke(self):
+    def test_smoke_three_pairs(self):
         import matplotlib.pyplot as plt
-        scatter = {
-            "ODR 1.5s": dict(x=np.array([1, 2, 3, 4.0]),
-                             y=np.array([0.1, 0.2, 0.3, 0.4]),
-                             labels=["a", "b", "c", "d"]),
-            "ODR 3.0s": dict(x=np.array([5, 6, 7, 8.0]),
-                             y=np.array([0.5, 0.6, 0.7, 0.8]),
-                             labels=["e", "f", "g", "h"]),
+        from functions.cross_task import CAT_NAMES
+
+        rng = np.random.default_rng(0)
+        n_iter = 5
+        results = {
+            'cat_means': {c: rng.uniform(0.1, 0.5, n_iter) for c in CAT_NAMES},
+            'mantel_r': {
+                ('Task A', 'Task B'): rng.uniform(0.5, 0.9, n_iter),
+                ('Task A', 'Task C'): rng.uniform(0.3, 0.7, n_iter),
+                ('Task B', 'Task C'): rng.uniform(0.4, 0.8, n_iter),
+            },
+            'last_dist': rng.uniform(0, 1, (9, 9)),
+            'last_labels': [f'M{i}' for i in range(9)],
+            'cat_names': CAT_NAMES,
+            'n_iter': n_iter,
         }
-        plot_correlation_panels(scatter, "x label", "y label", suptitle="test")
+        plot_cross_task(results)
         plt.close("all")
 
 

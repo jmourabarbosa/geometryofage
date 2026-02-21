@@ -180,6 +180,7 @@ def load_all_task_data(data_dir):
     -------
     task_data : dict
         {task_name: dict(data, ids, abs_age)} for 'ODR 1.5s', 'ODR 3.0s', 'ODRd'.
+        abs_age is chronological age in months.
     """
     import os
 

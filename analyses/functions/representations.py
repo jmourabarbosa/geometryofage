@@ -60,7 +60,8 @@ def pca_reduce(X, n_pcs):
         Fraction of total variance explained.
     """
     n_neurons, n_features = X.shape
-    n_pcs_actual = min(n_pcs, n_neurons, n_features)
+    
+    n_pcs_actual = n_pcs #min(n_pcs, n_neurons, n_features)
 
     pca = PCA(n_components=n_pcs_actual)
     projected = pca.fit_transform(X.T).T  # (n_pcs_actual, n_features)
@@ -73,6 +74,60 @@ def pca_reduce(X, n_pcs):
         ])
 
     return projected, pca.explained_variance_ratio_.sum()
+
+
+def pca_reduce_tuning(grouped, n_pcs, min_neurons=10):
+    """PCA-reduce tuning curves per monkey x age group.
+
+    For each group:
+      1. Flatten (n_neurons, n_conds, n_epochs) -> (n_neurons, n_conds*n_epochs)
+      2. Z-score neurons across the flattened features
+      3. Fit PCA on the flattened data
+      4. Project each (condition, epoch) separately -> (n_pcs, n_conds, n_epochs)
+
+    Parameters
+    ----------
+    grouped : dict
+        {monkey: {age_group: ndarray (n_neurons, n_conditions, n_epochs)}}
+    n_pcs : int
+    min_neurons : int
+        Groups with fewer clean neurons are skipped.
+
+    Returns
+    -------
+    reduced : dict
+        {monkey: {age_group: dict(tc, n_neurons, var_explained)}}
+        tc has shape (n_pcs, n_conditions, n_epochs).
+    """
+    reduced = {}
+    for mid, groups_dict in grouped.items():
+        reduced[mid] = {}
+        for g, tc in groups_dict.items():
+            n_neurons, n_conds, n_epochs = tc.shape
+
+            # Flatten, z-score, check count
+            flat = tc.reshape(n_neurons, -1)
+            flat = zscore_neurons(flat)
+            if flat.shape[0] < min_neurons:
+                continue
+
+            # Fit PCA on flattened
+            pca = PCA(n_components=n_pcs)
+            pca.fit(flat.T)  # (n_features, n_neurons) -> learns components (n_pcs, n_neurons)
+
+            # Project unflattened: for each (cond, epoch), project (n_neurons,) -> (n_pcs,)
+            projected = np.zeros((n_pcs, n_conds, n_epochs))
+            for c in range(n_conds):
+                for e in range(n_epochs):
+                    projected[:, c, e] = pca.components_ @ flat[:, c * n_epochs + e]
+
+            reduced[mid][g] = dict(
+                tc=projected,
+                n_neurons=flat.shape[0],
+                var_explained=pca.explained_variance_ratio_.sum(),
+            )
+
+    return reduced
 
 
 def build_representations(tuning, ids, groups, n_pcs, min_neurons=10, zscore=True):
@@ -113,52 +168,3 @@ def build_representations(tuning, ids, groups, n_pcs, min_neurons=10, zscore=Tru
     return entries
 
 
-def build_window_entries(tuning, ids, neuron_age, n_pcs,
-                         n_windows=20, min_neurons=10, zscore=True):
-    """
-    Build PCA representations for each (monkey, age window) combination.
-    Each monkey's neurons are sorted by age and split into n_windows
-    equal-count groups. Monkeys with too few neurons get fewer windows.
-
-    Parameters
-    ----------
-    tuning : ndarray, shape (n_neurons, n_features)
-    ids : ndarray of str, shape (n_neurons,)
-    neuron_age : ndarray, shape (n_neurons,)
-        Age in days for each neuron.
-    n_pcs : int
-    n_windows : int
-    min_neurons : int
-    zscore : bool
-
-    Returns
-    -------
-    entries : list of dict
-        Each dict has keys: 'monkey', 'group', 'center_days', 'matrix',
-        'n_neurons', 'var_explained'.
-    """
-    entries = []
-    monkey_names = sorted(set(ids))
-
-    for mid in monkey_names:
-        mk_mask = ids == mid
-        mk_ages = neuron_age[mk_mask]
-        mk_tuning = tuning[mk_mask]
-
-        # Cap windows so each has at least min_neurons
-        n_win = min(n_windows, len(mk_ages) // min_neurons)
-        if n_win < 1:
-            continue
-
-        # Sort by age, split into equal-count groups
-        order = np.argsort(mk_ages)
-        groups = np.array_split(order, n_win)
-
-        for wi, idx in enumerate(groups):
-            entry = _build_entry(mk_tuning[idx], n_pcs, min_neurons, zscore,
-                                 monkey=mid, group=wi,
-                                 center_days=mk_ages[idx].mean())
-            if entry is not None:
-                entries.append(entry)
-
-    return entries

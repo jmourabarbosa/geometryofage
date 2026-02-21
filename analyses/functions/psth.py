@@ -98,12 +98,141 @@ def compute_tuning_curves(rates, bin_centers, epoch_windows):
             if trial_data.shape[0] == 0:
                 continue
             # Average across trials first
-            mean_rate = trial_data.mean(axis=0)  # (n_bins,)
+            mean_rate = np.nanmean(trial_data, axis=0)  # (n_bins,)
             # Then average within each epoch
             for ei, name in enumerate(epoch_names):
-                tuning[i, c, ei] = mean_rate[epoch_masks[name]].mean()
+                tuning[i, c, ei] = np.nanmean(mean_rate[epoch_masks[name]])
 
     return tuning, epoch_names
+
+
+def compute_flat_tuning(data, t_range, epochs, bin_ms=50):
+    """Compute flattened tuning curves from raw spike data.
+
+    bins -> compute_single_trial_rates -> compute_tuning_curves -> flatten.
+
+    Parameters
+    ----------
+    data : ndarray, shape (n_neurons, n_conditions), dtype=object
+    t_range : tuple
+        (start_ms, end_ms) for bin edges.
+    epochs : dict
+        e.g. {"cue": (0, 500), "delay": (500, 2000)}.
+    bin_ms : int
+        Bin width in milliseconds.
+
+    Returns
+    -------
+    flat : ndarray, shape (n_neurons, n_conditions * n_epochs)
+    rates : list of lists
+    bc : ndarray
+        Bin centers.
+    """
+    bins = np.arange(t_range[0], t_range[1] + bin_ms, bin_ms)
+    bc = (bins[:-1] + bins[1:]) / 2.0
+    rates = compute_single_trial_rates(data, bins)
+    tuning, _ = compute_tuning_curves(rates, bc, epochs)
+    flat = tuning.reshape(tuning.shape[0], -1)
+    return flat, rates, bc
+
+
+def pooled_tuning_by_group(task_data_dict, epochs, age_edges, bin_ms=25):
+    """Compute tuning curves pooled across tasks, grouped by monkey x age group.
+
+    Parameters
+    ----------
+    task_data_dict : dict
+        {task_name: dict(data, ids, abs_age)}
+        ``data`` should already be filtered to the common conditions
+        (e.g. 4 cardinal directions).
+    epochs : dict
+        e.g. {'cue': (0, 500), 'delay': (500, 1700)}.
+    age_edges : tuple
+        Bin edges for age groups (passed to assign_age_groups).
+    bin_ms : int
+
+    Returns
+    -------
+    grouped : dict
+        {monkey: {age_group: ndarray (n_neurons, n_conditions, n_epochs)}}
+    epoch_names : list of str
+    """
+    from .analysis import assign_age_groups
+
+    # Determine time range from epoch bounds
+    t_min = min(t0 for t0, _ in epochs.values())
+    t_max = max(t1 for _, t1 in epochs.values())
+    # Add pre-cue buffer for binning
+    t_range = (min(t_min, -500), t_max + bin_ms)
+
+    bins = np.arange(t_range[0], t_range[1] + bin_ms, bin_ms)
+    bc = (bins[:-1] + bins[1:]) / 2.0
+
+    # Compute tuning per task, collect with monkey/group labels
+    all_tuning = []
+    all_ids = []
+    all_groups = []
+
+    for task_name, td in task_data_dict.items():
+        rates = compute_single_trial_rates(td['data'], bins)
+        tuning, epoch_names = compute_tuning_curves(rates, bc, epochs)
+        ag = assign_age_groups(td['abs_age'], age_edges)
+
+        all_tuning.append(tuning)
+        all_ids.append(td['ids'])
+        all_groups.append(ag)
+
+    all_tuning = np.concatenate(all_tuning, axis=0)
+    all_ids = np.concatenate(all_ids)
+    all_groups = np.concatenate(all_groups)
+
+    # Group by monkey x age group
+    grouped = {}
+    for mid in sorted(set(all_ids)):
+        grouped[mid] = {}
+        for g in sorted(set(all_groups)):
+            mask = (all_ids == mid) & (all_groups == g)
+            if mask.sum() == 0:
+                continue
+            grouped[mid][g] = all_tuning[mask]
+
+    return grouped, epoch_names
+
+
+def group_tuning_curves(rates, bc, epochs, ids, age_groups):
+    """Compute tuning curves and group by monkey and age group.
+
+    Parameters
+    ----------
+    rates : list of lists
+        Output of compute_single_trial_rates.
+    bc : ndarray
+        Bin centers.
+    epochs : dict
+        Epoch windows, e.g. {"cue": (0, 500), "delay": (500, 2000)}.
+    ids : ndarray of str (n_neurons,)
+        Monkey ID per neuron.
+    age_groups : ndarray of int (n_neurons,)
+        Age group per neuron.
+
+    Returns
+    -------
+    grouped : dict
+        {monkey: {age_group: ndarray (n_neurons_subset, n_conditions, n_epochs)}}
+    epoch_names : list of str
+    """
+    tuning, epoch_names = compute_tuning_curves(rates, bc, epochs)
+
+    grouped = {}
+    for mid in sorted(set(ids)):
+        grouped[mid] = {}
+        for g in sorted(set(age_groups)):
+            mask = (ids == mid) & (age_groups == g)
+            if mask.sum() == 0:
+                continue
+            grouped[mid][g] = tuning[mask]
+
+    return grouped, epoch_names
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

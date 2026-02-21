@@ -23,7 +23,7 @@ def rates_to_psth(rates):
     for i in range(n_neurons):
         for c in range(n_conds):
             if rates[i][c].shape[0] > 0:
-                psth[i, c] = rates[i][c].mean(axis=0)
+                psth[i, c] = np.nanmean(rates[i][c], axis=0)
     return psth
 
 
@@ -52,6 +52,7 @@ def _sliding_procrustes(psth, bc, ids, age_group, pair_fn,
             n_pcs=n_pcs, min_neurons=min_neurons, zscore=True
         )
         if len(entries_t) < 3:
+            print(f'Time {window_centers[ti]:.1f} ms: not enough entries ({len(entries_t)})')
             continue
 
         dist_t = procrustes_distance_matrix(entries_t)
@@ -65,15 +66,29 @@ def _sliding_procrustes(psth, bc, ids, age_group, pair_fn,
             if len(dists) == 0:
                 continue
             for b in range(n_boot):
-                boots_dict[key][b, ti] = rng.choice(dists, len(dists), replace=True).mean()
+                boots_dict[key][b, ti] = np.nanmean(rng.choice(dists, len(dists), replace=True))
 
     return window_centers, boots_dict
 
 
-def temporal_cross_monkey(psth, bc, ids, age_group,
+def temporal_cross_monkey(psth, bc, ids, common_ids=None,
                           n_pcs=8, min_neurons=9,
                           window_ms=500, step_ms=50, n_boot=1000):
-    """Cross-monkey Procrustes distance in sliding windows with bootstrap."""
+    """Cross-monkey Procrustes distance in sliding windows with bootstrap.
+
+    All neurons per monkey are pooled (no age grouping).
+
+    Parameters
+    ----------
+    common_ids : list of str, optional
+        If given, restrict to these monkeys only.
+    """
+    if common_ids is not None:
+        mask = np.isin(ids, common_ids)
+        psth, ids = psth[mask], ids[mask]
+
+    single_group = np.zeros(len(ids), dtype=int)
+
     def pair_fn(dist, me, ge, n):
         cross = np.array([dist[i, j]
                           for i in range(n) for j in range(i + 1, n)
@@ -81,7 +96,7 @@ def temporal_cross_monkey(psth, bc, ids, age_group,
         return {'_': cross}
 
     t, boots = _sliding_procrustes(
-        psth, bc, ids, age_group, pair_fn,
+        psth, bc, ids, single_group, pair_fn,
         n_pcs, min_neurons, window_ms, step_ms, n_boot
     )
     return t, boots.get('_', np.full((n_boot, len(t)), np.nan))
@@ -104,24 +119,3 @@ def temporal_cross_age(psth, bc, ids, age_group,
     return t, boots.get('_', np.full((n_boot, len(t)), np.nan))
 
 
-def temporal_cross_age_by_pair(psth, bc, ids, age_group, age_pairs,
-                               n_pcs=8, min_neurons=9,
-                               window_ms=500, step_ms=50, n_boot=1000):
-    """Within-monkey cross-age Procrustes per age pair in sliding windows."""
-    def pair_fn(dist, me, ge, n):
-        result = {}
-        for ga, gb in age_pairs:
-            dists = np.array([
-                dist[i, j]
-                for i in range(n) for j in range(i + 1, n)
-                if me[i] == me[j]
-                and ((ge[i] == ga and ge[j] == gb) or (ge[i] == gb and ge[j] == ga))
-            ])
-            result[(ga, gb)] = dists
-        return result
-
-    t, boots_dict = _sliding_procrustes(
-        psth, bc, ids, age_group, pair_fn,
-        n_pcs, min_neurons, window_ms, step_ms, n_boot
-    )
-    return t, boots_dict
