@@ -109,21 +109,19 @@ def _baseline_normalize(boots, t):
     return boots - np.nanmean(boots[:, t < 0], axis=1, keepdims=True)
 
 
-def plot_temporal(temporal_results, ci=95,
+def plot_temporal(temporal_results,
                   ylabel='Mean Procrustes distance', title='Temporal Procrustes'):
-    """Temporal bootstrap traces with baseline normalization and CI shading."""
-    alpha = (100 - ci) / 2
+    """Temporal bootstrap traces with baseline normalization and ±SE shading."""
     fig, ax = plt.subplots(figsize=(14, 5))
 
     for task_name, TR in temporal_results.items():
         c = TASK_COLORS[task_name]
         boots = _baseline_normalize(TR['boots'], TR['t'])
         mean = np.nanmean(boots, axis=0)
-        lo = np.nanpercentile(boots, alpha, axis=0)
-        hi = np.nanpercentile(boots, 100 - alpha, axis=0)
+        sem = np.nanstd(boots, axis=0)
 
         ax.plot(TR['t'], mean, label=task_name, lw=1.5, color=c)
-        ax.fill_between(TR['t'], lo, hi, color=c, alpha=0.2)
+        ax.fill_between(TR['t'], mean - sem, mean + sem, color=c, alpha=0.2)
         for _, t_ms in TASK_EVENTS[task_name].items():
             ax.axvline(t_ms, color=c, ls=':', alpha=0.4, lw=1)
 
@@ -136,11 +134,10 @@ def plot_temporal(temporal_results, ci=95,
     plt.show()
 
 
-def plot_temporal_by_pair(temporal_pair_results, ci=95):
+def plot_temporal_by_pair(temporal_pair_results):
     """Temporal cross-age Procrustes separated by age pair."""
     pair_styles = {(0, 1): '-', (1, 2): '--', (0, 2): ':'}
     pair_labels = {(0, 1): 'G0-G1', (1, 2): 'G1-G2', (0, 2): 'G0-G2'}
-    alpha = (100 - ci) / 2
 
     fig, ax = plt.subplots(figsize=(14, 5))
 
@@ -149,12 +146,11 @@ def plot_temporal_by_pair(temporal_pair_results, ci=95):
         for pair, boots in TR['boots_by_pair'].items():
             boots_norm = _baseline_normalize(boots, TR['t'])
             mean = np.nanmean(boots_norm, axis=0)
-            lo = np.nanpercentile(boots_norm, alpha, axis=0)
-            hi = np.nanpercentile(boots_norm, 100 - alpha, axis=0)
+            sem = np.nanstd(boots_norm, axis=0)
 
             ax.plot(TR['t'], mean, ls=pair_styles[pair], lw=1.5, color=c,
                     label=f'{task_name} {pair_labels[pair]}')
-            ax.fill_between(TR['t'], lo, hi, color=c, alpha=0.08)
+            ax.fill_between(TR['t'], mean - sem, mean + sem, color=c, alpha=0.08)
 
         for _, t_ms in TASK_EVENTS[task_name].items():
             ax.axvline(t_ms, color=c, ls=':', alpha=0.4, lw=1)
@@ -162,7 +158,7 @@ def plot_temporal_by_pair(temporal_pair_results, ci=95):
     ax.axhline(0, color='k', ls='--', lw=1)
     ax.set_xlabel('Window center (ms from cue onset)')
     ax.set_ylabel('Mean cross-age Procrustes distance')
-    ax.set_title(f'Cross-age by pair over time ({ci}% CI)')
+    ax.set_title('Cross-age by pair over time (\u00b1SE)')
     ax.legend(fontsize=7, ncol=3)
     plt.tight_layout()
     plt.show()
@@ -261,3 +257,89 @@ def plot_correlation_panels(scatter_data, xlabel, ylabel, suptitle=None):
         plt.suptitle(suptitle, y=1.02)
     plt.tight_layout()
     plt.show()
+
+
+def plot_cross_task(results):
+    """Bar chart with SE error bars, Mantel histogram, and example distance matrix.
+
+    Parameters
+    ----------
+    results : dict
+        Output of cross_task_cv.
+    """
+    cat_means = results['cat_means']
+    cat_names = results['cat_names']
+    mantel_r = results['mantel_r']
+    n_iter = results['n_iter']
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    # Bar plot: mean distance per category with SE error bars
+    ax = axes[0]
+    cat_colors = ['#4CAF50', '#2196F3', '#FF9800', '#F44336']
+    positions = range(len(cat_names))
+    means = [np.mean(cat_means[c]) for c in cat_names]
+    sems = [np.std(cat_means[c]) for c in cat_names]
+    ax.bar(positions, means, yerr=sems, capsize=5, color=cat_colors, alpha=0.7,
+           edgecolor='k', linewidth=0.5)
+    ymin = min(m - s for m, s in zip(means, sems))
+    ax.set_ylim(bottom=ymin * 0.9)
+    ax.set_xticks(list(positions))
+    ax.set_xticklabels(cat_names, fontsize=9)
+    ax.set_ylabel('Procrustes distance')
+    ax.set_title(f'Mean distance per category ({n_iter} iterations, \u00b1SE)')
+    for i, c in enumerate(cat_names):
+        ax.text(i, means[i] + sems[i] + 0.003, f'{means[i]:.3f}',
+                ha='center', fontsize=9)
+
+    # Mantel correlation histogram
+    ax = axes[1]
+    ax.hist(mantel_r, bins=20, color='steelblue', edgecolor='k', alpha=0.7)
+    ax.axvline(np.mean(mantel_r), color='r', ls='--', lw=1.5,
+               label=f'mean r = {np.mean(mantel_r):.3f}')
+    ax.set_xlabel('Pearson r (Mantel-like)')
+    ax.set_ylabel('Count')
+    ax.set_title('Cross-task distance correlation across splits')
+    ax.legend()
+
+    # Example distance matrix (last iteration)
+    ax = axes[2]
+    last_dist = results['last_dist']
+    last_labels = results['last_labels']
+    n = len(last_labels)
+    im = ax.imshow(last_dist, cmap='viridis')
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(last_labels, rotation=90, fontsize=7)
+    ax.set_yticklabels(last_labels, fontsize=7)
+    plt.colorbar(im, ax=ax, label='Procrustes disparity')
+    ax.set_title('Distance matrix (last iteration)')
+
+    plt.tight_layout()
+    plt.show()
+
+    # Summary stats
+    print('Category means [\u00b1SE]:')
+    for c in cat_names:
+        m = np.mean(cat_means[c])
+        sem = np.std(cat_means[c])
+        print(f'  {c.replace(chr(10), " "):30s}  {m:.4f} \u00b1 {sem:.4f}')
+
+    print(f'\nMantel r: mean = {np.mean(mantel_r):.3f} \u00b1 '
+          f'{np.std(mantel_r):.3f} (SE)')
+
+    # Bootstrap CI on differences
+    comparisons = [
+        ('Same monkey cross-task vs diff monkey within-task',
+         cat_names[1], cat_names[2]),
+        ('Same monkey cross-task vs diff monkey cross-task',
+         cat_names[1], cat_names[3]),
+    ]
+    print()
+    for label, ca, cb in comparisons:
+        diffs = cat_means[ca] - cat_means[cb]
+        ci_lo, ci_hi = np.percentile(diffs, [2.5, 97.5])
+        print(f'{label}:\n'
+              f'  diff median = {np.median(diffs):.4f}, '
+              f'95% CI = [{ci_lo:.4f}, {ci_hi:.4f}], '
+              f'{"excludes" if ci_lo > 0 or ci_hi < 0 else "includes"} zero')

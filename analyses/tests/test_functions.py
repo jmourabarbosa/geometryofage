@@ -11,15 +11,16 @@ matplotlib.use("Agg")
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from functions.representations import zscore_neurons, pca_reduce, build_representations, build_window_entries
+from functions.representations import (zscore_neurons, pca_reduce, build_representations,
+                                       build_window_entries, _clean_neurons, _build_entry)
 from functions.procrustes import procrustes_distance_matrix
 from functions.analysis import (assign_age_groups, cross_monkey_analysis, cross_age_analysis,
-                                extract_entry_arrays, _mean_within_monkey)
+                                extract_entry_arrays, _mean_within_monkey, _quantile_bin)
 from functions.decoding import knn_decode_monkey, knn_decode_age, regress_age, _knn_loo_predict
 from functions.temporal import rates_to_psth, temporal_cross_monkey, temporal_cross_age, temporal_cross_age_by_pair
 from functions.plotting import (_baseline_normalize, plot_cross_monkey, plot_distance_matrices,
                                 plot_cross_age, plot_temporal, plot_temporal_by_pair,
-                                plot_age_decoding, plot_correlation_panels)
+                                plot_age_decoding, plot_correlation_panels, plot_cross_task)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -607,6 +608,79 @@ class TestPlotAgeDecoding:
         plt.close("all")
 
 
+class TestComputeFlatTuning:
+    def test_output_shape(self):
+        from unittest.mock import patch
+        from functions.psth import compute_flat_tuning
+
+        rng = np.random.default_rng(0)
+        n_neurons, n_conds, n_epochs = 5, 4, 2
+        mock_rates = [[rng.standard_normal((10, 50)) for _ in range(n_conds)]
+                       for _ in range(n_neurons)]
+        mock_tuning = rng.standard_normal((n_neurons, n_conds, n_epochs))
+        dummy_data = np.empty((n_neurons, n_conds), dtype=object)
+
+        with patch('functions.psth.compute_single_trial_rates', return_value=mock_rates), \
+             patch('functions.psth.compute_tuning_curves', return_value=(mock_tuning, ['cue', 'delay'])):
+            flat, rates, bc = compute_flat_tuning(
+                dummy_data, (-500, 2000), {'cue': (0, 500), 'delay': (500, 2000)}, bin_ms=50)
+
+        assert flat.shape == (n_neurons, n_conds * n_epochs)
+        assert rates is mock_rates
+        assert len(bc) == 50  # (2500 / 50) bins
+
+
+class TestCrossTaskCv:
+    def test_output_keys(self):
+        from functions.cross_task import cross_task_cv
+
+        rng = np.random.default_rng(0)
+        n = 60
+        tuning_flat = {
+            'Task A': rng.standard_normal((n, 16)),
+            'Task B': rng.standard_normal((n, 16)),
+        }
+        task_ids = {
+            'Task A': np.array(['M0'] * 20 + ['M1'] * 20 + ['M2'] * 20),
+            'Task B': np.array(['M0'] * 20 + ['M1'] * 20 + ['M2'] * 20),
+        }
+        results = cross_task_cv(tuning_flat, task_ids,
+                                n_pcs=4, min_neurons=5, n_iter=3, seed=0)
+
+        assert 'cat_means' in results
+        assert 'mantel_r' in results
+        assert 'last_dist' in results
+        assert 'last_labels' in results
+        assert 'cat_names' in results
+        assert 'n_iter' in results
+
+        # Check iteration count
+        for c in results['cat_names']:
+            assert len(results['cat_means'][c]) == 3
+
+        # Check category names
+        assert len(results['cat_names']) == 4
+
+
+class TestPlotCrossTask:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        from functions.cross_task import CAT_NAMES
+
+        rng = np.random.default_rng(0)
+        n_iter = 5
+        results = {
+            'cat_means': {c: rng.uniform(0.1, 0.5, n_iter) for c in CAT_NAMES},
+            'mantel_r': rng.uniform(0.5, 0.9, n_iter),
+            'last_dist': rng.uniform(0, 1, (6, 6)),
+            'last_labels': [f'M{i}' for i in range(6)],
+            'cat_names': CAT_NAMES,
+            'n_iter': n_iter,
+        }
+        plot_cross_task(results)
+        plt.close("all")
+
+
 class TestPlotCorrelationPanels:
     def test_smoke(self):
         import matplotlib.pyplot as plt
@@ -620,3 +694,76 @@ class TestPlotCorrelationPanels:
         }
         plot_correlation_panels(scatter, "x label", "y label", suptitle="test")
         plt.close("all")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# representations.py — _clean_neurons, _build_entry
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCleanNeurons:
+    def test_removes_nan(self):
+        X = np.array([[1, 2], [np.nan, 1], [3, 4]], dtype=float)
+        out = _clean_neurons(X)
+        assert out.shape[0] == 2
+        np.testing.assert_array_equal(out, [[1, 2], [3, 4]])
+
+    def test_removes_zero_variance(self):
+        X = np.array([[1, 2], [5, 5], [3, 4]], dtype=float)
+        out = _clean_neurons(X)
+        assert out.shape[0] == 2
+
+    def test_preserves_good_rows(self):
+        X = np.array([[1, 2, 3], [4, 5, 6]], dtype=float)
+        out = _clean_neurons(X)
+        np.testing.assert_array_equal(out, X)
+
+
+class TestBuildEntry:
+    def test_success(self):
+        rng = np.random.default_rng(42)
+        X = rng.standard_normal((30, 8))
+        entry = _build_entry(X, n_pcs=4, min_neurons=10, zscore=True)
+        assert entry is not None
+        assert entry['matrix'].shape == (4, 8)
+        assert entry['n_neurons'] >= 10
+        assert 0 < entry['var_explained'] <= 1
+
+    def test_too_few_returns_none(self):
+        rng = np.random.default_rng(42)
+        X = rng.standard_normal((5, 8))
+        entry = _build_entry(X, n_pcs=4, min_neurons=10, zscore=True)
+        assert entry is None
+
+    def test_extra_keys_propagated(self):
+        rng = np.random.default_rng(42)
+        X = rng.standard_normal((30, 8))
+        entry = _build_entry(X, n_pcs=4, min_neurons=10, zscore=True,
+                             monkey='A', group=2)
+        assert entry['monkey'] == 'A'
+        assert entry['group'] == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# analysis.py — _quantile_bin
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestQuantileBin:
+    def test_basic(self):
+        values = np.arange(100, dtype=float)
+        labels, edges = _quantile_bin(values, 4)
+        assert set(labels) == {0, 1, 2, 3}
+        assert len(edges) == 5
+
+    def test_precomputed_edges(self):
+        values = np.array([10, 20, 30, 40, 50], dtype=float)
+        edges = np.array([0, 15, 35, 60], dtype=float)
+        labels, edges_out = _quantile_bin(values, 3, edges=edges)
+        np.testing.assert_array_equal(edges_out, edges)
+        # 10 < 15 -> bin 0, 20 and 30 between 15 and 35 -> bin 1, 40 and 50 > 35 -> bin 2
+        np.testing.assert_array_equal(labels, [0, 1, 1, 2, 2])
+
+    def test_clipping(self):
+        values = np.array([0, 100], dtype=float)
+        labels, _ = _quantile_bin(values, 3)
+        assert labels[0] == 0
+        assert labels[-1] == 2

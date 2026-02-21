@@ -48,16 +48,33 @@ def _mean_within_monkey(me, dist):
     return mean_within
 
 
+def _quantile_bin(values, n_groups, edges=None):
+    """Assign values to quantile-based bins.
+
+    Parameters
+    ----------
+    values : array-like
+    n_groups : int
+    edges : ndarray, optional
+        Pre-computed bin edges. Computed from *values* if None.
+
+    Returns
+    -------
+    labels : ndarray of int
+    edges : ndarray
+    """
+    if edges is None:
+        edges = np.quantile(values, np.linspace(0, 1, n_groups + 1))
+    return np.clip(np.digitize(values, edges[1:-1]), 0, n_groups - 1), edges
+
+
 def assign_age_groups(ids, abs_age, n_age_groups):
     """Assign neurons to age groups per monkey based on quantiles."""
     monkey_names = sorted(set(ids))
     age_group = np.zeros(len(ids), dtype=int)
     for mid in monkey_names:
         mask = ids == mid
-        edges = np.quantile(abs_age[mask], np.linspace(0, 1, n_age_groups + 1))
-        age_group[mask] = np.clip(
-            np.digitize(abs_age[mask], edges[1:-1]), 0, n_age_groups - 1
-        )
+        age_group[mask], _ = _quantile_bin(abs_age[mask], n_age_groups)
     return age_group
 
 
@@ -169,13 +186,12 @@ def load_behavioral_perf(beh_odr_path, beh_odrd_path, task_metadata, n_age_group
             continue
         for mid in sorted(set(neural_ids)):
             neural_ages_mk = neural_abs_age[neural_ids == mid]
-            edges = np.quantile(neural_ages_mk, np.linspace(0, 1, n_age_groups + 1))
+            _, edges = _quantile_bin(neural_ages_mk, n_age_groups)
             beh_mk = beh_df[beh_df['Monkey'] == mid].copy()
             if len(beh_mk) == 0:
                 continue
-            beh_mk['group'] = np.clip(
-                np.digitize(beh_mk['abs_age_months'].values, edges[1:-1]),
-                0, n_age_groups - 1,
+            beh_mk['group'], _ = _quantile_bin(
+                beh_mk['abs_age_months'].values, n_age_groups, edges=edges,
             )
             for g in range(n_age_groups):
                 sessions = beh_mk[beh_mk['group'] == g]

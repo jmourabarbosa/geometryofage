@@ -6,6 +6,12 @@ import numpy as np
 from sklearn.decomposition import PCA
 
 
+def _clean_neurons(X):
+    """Remove neurons with NaN/Inf or zero variance."""
+    good = np.all(np.isfinite(X), axis=1) & (np.std(X, axis=1) > 0)
+    return X[good]
+
+
 def zscore_neurons(X):
     """
     Z-score each neuron (row) across conditions (columns).
@@ -19,10 +25,20 @@ def zscore_neurons(X):
     -------
     X_clean : ndarray, shape (n_good, n_features)
     """
-    good = np.all(np.isfinite(X), axis=1) & (np.std(X, axis=1) > 0)
-    X = X[good]
+    X = _clean_neurons(X)
     X = (X - X.mean(axis=1)[:, None]) / X.std(axis=1)[:, None]
     return X
+
+
+def _build_entry(X, n_pcs, min_neurons, zscore, **extra):
+    """Clean → check count → PCA → dict. Returns None if too few neurons."""
+    X = zscore_neurons(X) if zscore else _clean_neurons(X)
+    if X.shape[0] < min_neurons:
+        return None
+    matrix, var_exp = pca_reduce(X, n_pcs)
+    entry = {'matrix': matrix, 'n_neurons': X.shape[0], 'var_explained': var_exp}
+    entry.update(extra)
+    return entry
 
 
 def pca_reduce(X, n_pcs):
@@ -89,26 +105,10 @@ def build_representations(tuning, ids, groups, n_pcs, min_neurons=10, zscore=Tru
             mask = (ids == mid) & (groups == g)
             if mask.sum() < min_neurons:
                 continue
-
-            X = tuning[mask]
-            if zscore:
-                X = zscore_neurons(X)
-            else:
-                good = np.all(np.isfinite(X), axis=1) & (np.std(X, axis=1) > 0)
-                X = X[good]
-
-            if X.shape[0] < min_neurons:
-                continue
-
-            matrix, var_exp = pca_reduce(X, n_pcs)
-
-            entries.append({
-                "monkey": mid,
-                "group": g,
-                "matrix": matrix,
-                "n_neurons": X.shape[0],
-                "var_explained": var_exp,
-            })
+            entry = _build_entry(tuning[mask], n_pcs, min_neurons, zscore,
+                                 monkey=mid, group=g)
+            if entry is not None:
+                entries.append(entry)
 
     return entries
 
@@ -155,23 +155,10 @@ def build_window_entries(tuning, ids, neuron_age, n_pcs,
         groups = np.array_split(order, n_win)
 
         for wi, idx in enumerate(groups):
-            X = mk_tuning[idx]
-            center = mk_ages[idx].mean()
-            if zscore:
-                X = zscore_neurons(X)
-            else:
-                good = np.all(np.isfinite(X), axis=1) & (np.std(X, axis=1) > 0)
-                X = X[good]
-            if X.shape[0] < min_neurons:
-                continue
-            matrix, var_exp = pca_reduce(X, n_pcs)
-            entries.append({
-                'monkey': mid,
-                'group': wi,
-                'center_days': center,
-                'matrix': matrix,
-                'n_neurons': X.shape[0],
-                'var_explained': var_exp,
-            })
+            entry = _build_entry(mk_tuning[idx], n_pcs, min_neurons, zscore,
+                                 monkey=mid, group=wi,
+                                 center_days=mk_ages[idx].mean())
+            if entry is not None:
+                entries.append(entry)
 
     return entries

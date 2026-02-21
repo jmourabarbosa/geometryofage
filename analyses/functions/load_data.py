@@ -161,3 +161,51 @@ def _read_doubles(workspace, offset, n):
     start = offset + 8
     end = start + n * 8
     return np.frombuffer(workspace[start:end], dtype="<f8").copy()
+
+
+def _abs_age_months(age_days, mature_days):
+    """Convert age-from-maturation and maturation date to absolute age in months."""
+    return (age_days + mature_days) / 365.0 * 12.0
+
+
+def load_all_task_data(data_dir):
+    """Load ODR and ODRd data, split by task, compute absolute ages.
+
+    Parameters
+    ----------
+    data_dir : str
+        Path to directory containing .mat files.
+
+    Returns
+    -------
+    task_data : dict
+        {task_name: dict(data, ids, abs_age)} for 'ODR 1.5s', 'ODR 3.0s', 'ODRd'.
+    """
+    import os
+
+    odr_data_all, ws_odr = load_odr_data(
+        os.path.join(data_dir, 'odr_data_both_sig_is_best_20240109.mat'))
+    ids_all, age_all, mature_all, delay_all = extract_metadata(
+        ws_odr, odr_data_all.shape[0])
+
+    odrd_raw, ws_odrd = load_odrd_data(
+        os.path.join(data_dir, 'odrd_data_sig_on_best_20231018.mat'))
+    odrd_ids, odrd_age, odrd_mat, _ = extract_metadata(ws_odrd, odrd_raw.shape[0])
+    odrd_data = split_odrd_by_distractor(odrd_raw)
+
+    task_data = {}
+    for delay, name in [(1.5, 'ODR 1.5s'), (3.0, 'ODR 3.0s')]:
+        mask = delay_all == delay
+        task_data[name] = dict(
+            data=odr_data_all[mask],
+            ids=ids_all[mask],
+            abs_age=_abs_age_months(age_all[mask], mature_all[mask]),
+        )
+
+    task_data['ODRd'] = dict(
+        data=odrd_data,
+        ids=odrd_ids,
+        abs_age=_abs_age_months(odrd_age, odrd_mat),
+    )
+
+    return task_data
