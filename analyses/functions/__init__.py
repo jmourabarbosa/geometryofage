@@ -4,7 +4,7 @@ from .psth import (compute_single_trial_rates, compute_tuning_curves,
                    compute_flat_tuning, group_tuning_curves,
                    pooled_tuning_by_group)
 from .representations import zscore_neurons, pca_reduce, build_representations, pca_reduce_tuning
-from .procrustes import procrustes_distance_matrix
+from .procrustes import procrustes_distance_matrix, generalized_procrustes
 from .cross_task import cross_task_cv
 from .analysis import (assign_age_groups, cross_monkey_analysis, cross_age_analysis,
                        extract_entry_arrays, cross_monkey_by_age,
