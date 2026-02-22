@@ -27,5 +27,10 @@ from .plotting import (plot_cross_monkey, plot_distance_matrices, plot_cross_age
                        print_cross_task_summary, print_cross_monkey_by_group_summary,
                        plot_cross_epoch_correlations, plot_3d_grid,
                        plot_within_monkey_alignment, plot_global_alignment,
+                       p_to_stars,
+                       draw_3d_alignment, draw_cross_task_bars,
+                       draw_cross_age_bars, draw_cross_monkey_scatter,
+                       draw_neural_vs_behavior, draw_cross_epoch_vs_behavior,
+                       draw_correlation_matrices,
                        TASK_COLORS, STIM_COLORS, STIM_LABELS, AGE_COLORS,
                        AGE_GROUP_LABELS, TASK_EVENTS)

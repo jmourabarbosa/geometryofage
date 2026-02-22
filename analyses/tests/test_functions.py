@@ -27,6 +27,11 @@ from functions.plotting import (_baseline_normalize, plot_cross_monkey, plot_dis
                                 plot_3d_representation, wall_projections,
                                 plot_3d_grid, plot_within_monkey_alignment,
                                 plot_global_alignment, plot_cross_epoch_correlations,
+                                p_to_stars,
+                                draw_3d_alignment, draw_cross_task_bars,
+                                draw_cross_age_bars, draw_cross_monkey_scatter,
+                                draw_neural_vs_behavior, draw_cross_epoch_vs_behavior,
+                                draw_correlation_matrices,
                                 TASK_COLORS, STIM_COLORS, STIM_LABELS,
                                 AGE_COLORS, AGE_GROUP_LABELS)
 from functions.load_data import (CARDINAL_COLS, TASK_EPOCHS,
@@ -863,4 +868,196 @@ class TestPlotGlobalAlignment:
         }
         epoch_idx = np.arange(0, 8, 2)
         plot_global_alignment(reduced, epoch_idx)
+        plt.close('all')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# draw_* helpers and p_to_stars
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPToStars:
+    def test_all_thresholds(self):
+        assert p_to_stars(0.0001) == '***'
+        assert p_to_stars(0.005) == '**'
+        assert p_to_stars(0.03) == '*'
+        assert p_to_stars(0.1) == 'ns'
+
+    def test_custom_ns_label(self):
+        assert p_to_stars(0.5, ns_label='') == ''
+        assert p_to_stars(0.5, ns_label='n.s.') == 'n.s.'
+
+    def test_boundary_values(self):
+        assert p_to_stars(0.001) == '**'   # not < 0.001
+        assert p_to_stars(0.01) == '*'     # not < 0.01
+        assert p_to_stars(0.05) == 'ns'    # not < 0.05
+
+
+class TestDraw3dAlignment:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        task_result = {
+            'aligned_all': [rng.standard_normal((12, 3))],
+            'grand_mean': rng.standard_normal((12, 3)),
+            'enames': ['cue', 'delay', 'response'],
+            'lim': 1.5,
+        }
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        draw_3d_alignment(ax, task_result,
+                          ['cue', 'delay', 'response'],
+                          {'cue': '#2196F3', 'delay': '#FF9800', 'response': '#9C27B0'},
+                          ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3'], n_conds=4)
+        plt.close('all')
+
+
+class TestDrawCrossTaskBars:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        from functions.analysis import CAT_NAMES
+        rng = np.random.default_rng(0)
+        ct_results = {
+            'cat_means': {c: rng.uniform(0.1, 0.5, 10) for c in CAT_NAMES},
+            'cat_names': CAT_NAMES,
+        }
+        fig, ax = plt.subplots()
+        draw_cross_task_bars(ax, ct_results)
+        plt.close('all')
+
+
+class TestDrawCrossAgeBars:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        indiv_results = {
+            'ODR 1.5s': {'cross_age': {'same_age_adj': rng.standard_normal(20), 'p_val': 0.01}},
+            'ODR 3.0s': {'cross_age': {'same_age_adj': rng.standard_normal(20), 'p_val': 0.04}},
+        }
+        fig, ax = plt.subplots()
+        draw_cross_age_bars(ax, indiv_results, TASK_COLORS)
+        plt.close('all')
+
+
+class TestDrawCrossMonkeyScatter:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        results_by_group = {
+            'ODR 1.5s': {
+                'group_dists': {0: rng.uniform(0.1, 0.5, 10),
+                                1: rng.uniform(0.2, 0.6, 10),
+                                2: rng.uniform(0.3, 0.7, 10)},
+                'slope': 0.05, 'intercept': 0.2, 'p': 0.03,
+            },
+        }
+        pooled = {'slope': 0.04, 'intercept': 0.25, 'p': 0.01}
+        fig, ax = plt.subplots()
+        draw_cross_monkey_scatter(ax, results_by_group, pooled,
+                                  ['young', 'middle', 'old'], TASK_COLORS)
+        plt.close('all')
+
+
+class TestDrawNeuralVsBehavior:
+    def test_smoke_di(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        n = 6
+        indiv_results = {
+            'ODR 1.5s': {'dist': rng.uniform(0.1, 0.5, (n, n))},
+        }
+        beh_dist = {
+            'ODR 1.5s': {'di_dist': rng.uniform(0, 1, (n, n))},
+        }
+        fig, ax = plt.subplots()
+        draw_neural_vs_behavior(ax, indiv_results, beh_dist, 'di_dist', TASK_COLORS,
+                                xlabel='DI distance')
+        plt.close('all')
+
+    def test_smoke_rt(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        n = 6
+        indiv_results = {
+            'ODR 1.5s': {'dist': rng.uniform(0.1, 0.5, (n, n))},
+        }
+        beh_dist = {
+            'ODR 1.5s': {'rt_dist': rng.uniform(0, 1, (n, n))},
+        }
+        fig, ax = plt.subplots()
+        draw_neural_vs_behavior(ax, indiv_results, beh_dist, 'rt_dist', TASK_COLORS,
+                                xlabel='RT distance', show_ylabel=False, show_left_spine=False)
+        plt.close('all')
+
+
+class TestDrawCrossEpochVsBehavior:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        cross_epoch = {
+            'ODRd': {
+                'delay\u2192response': [
+                    {'monkey': 'M0', 'group': 0, 'distance': rng.uniform(0.1, 0.5)},
+                    {'monkey': 'M0', 'group': 1, 'distance': rng.uniform(0.1, 0.5)},
+                    {'monkey': 'M1', 'group': 0, 'distance': rng.uniform(0.1, 0.5)},
+                ],
+            },
+        }
+        cross_epoch_defs = {'ODRd': {}}
+        import pandas as pd
+        beh_df = pd.DataFrame({
+            'Monkey': ['M0', 'M0', 'M1'],
+            'Task': ['ODRd', 'ODRd', 'ODRd'],
+            'age_month': [40, 50, 60],
+            'DI': [0.5, 0.6, 0.7],
+            'RT': [300, 310, 320],
+        })
+        monkey_edges = {('ODRd', 'M0'): (45,), ('ODRd', 'M1'): (45,)}
+        fig, ax = plt.subplots()
+        draw_cross_epoch_vs_behavior(ax, cross_epoch, cross_epoch_defs, beh_df, monkey_edges,
+                                     'delay\u2192response', 'DI', TASK_COLORS,
+                                     xlabel='Procrustes dist.', ylabel='DI')
+        plt.close('all')
+
+
+class TestDrawCorrelationMatrices:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        from matplotlib.gridspec import GridSpec
+        rng = np.random.default_rng(0)
+        cross_epoch = {
+            'ODRd': {
+                'cue\u2192delay': [
+                    {'monkey': 'M0', 'group': 0, 'distance': rng.uniform(0.1, 0.5)},
+                    {'monkey': 'M0', 'group': 1, 'distance': rng.uniform(0.1, 0.5)},
+                    {'monkey': 'M1', 'group': 0, 'distance': rng.uniform(0.1, 0.5)},
+                ],
+                'cue\u2192response': [
+                    {'monkey': 'M0', 'group': 0, 'distance': rng.uniform(0.1, 0.5)},
+                    {'monkey': 'M0', 'group': 1, 'distance': rng.uniform(0.1, 0.5)},
+                    {'monkey': 'M1', 'group': 0, 'distance': rng.uniform(0.1, 0.5)},
+                ],
+                'delay\u2192response': [
+                    {'monkey': 'M0', 'group': 0, 'distance': rng.uniform(0.1, 0.5)},
+                    {'monkey': 'M0', 'group': 1, 'distance': rng.uniform(0.1, 0.5)},
+                    {'monkey': 'M1', 'group': 0, 'distance': rng.uniform(0.1, 0.5)},
+                ],
+            },
+        }
+        cross_epoch_defs = {'ODRd': {}}
+        import pandas as pd
+        beh_df = pd.DataFrame({
+            'Monkey': ['M0', 'M0', 'M1'],
+            'Task': ['ODRd', 'ODRd', 'ODRd'],
+            'age_month': [40, 50, 60],
+            'DI': [0.5, 0.6, 0.7],
+            'RT': [300, 310, 320],
+        })
+        monkey_edges = {('ODRd', 'M0'): (45,), ('ODRd', 'M1'): (45,)}
+        pairs = [('cue', 'delay'), ('cue', 'response'), ('delay', 'response')]
+        pos_map = {0: (0, 0), 1: (0, 1), 2: (1, 1)}
+
+        fig = plt.figure(figsize=(4, 4))
+        gs = GridSpec(1, 1, figure=fig)
+        draw_correlation_matrices(fig, gs[0, 0], cross_epoch, cross_epoch_defs,
+                                  beh_df, monkey_edges, pairs, pos_map)
         plt.close('all')

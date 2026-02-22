@@ -21,6 +21,14 @@ AGE_COLORS = ['#1b9e77', '#d95f02', '#7570b3']
 AGE_GROUP_LABELS = ['young', 'middle', 'old']
 
 
+def p_to_stars(p, ns_label='ns'):
+    """Convert p-value to significance stars."""
+    if p < 0.001: return '***'
+    if p < 0.01:  return '**'
+    if p < 0.05:  return '*'
+    return ns_label
+
+
 def plot_3d_representation(ax, pts, stim_colors, s=40, alpha=1.0,
                            lw=1.5, edge='k', ew=0.5):
     """Plot one 3-D representation: colored dots + circular connection.
@@ -468,7 +476,7 @@ def plot_cross_age_bars(results):
                   edgecolor='k', linewidth=0.5)
 
     for i, (m, s, p) in enumerate(zip(means, sems, pvals)):
-        star = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
+        star = p_to_stars(p)
         ax.text(i, m + s + 0.002, f'{m:.4f}\np={p:.4f} {star}',
                 ha='center', fontsize=8, va='bottom')
 
@@ -523,7 +531,7 @@ def plot_behavior_neural_bars(results, beh_dist):
             # Per-task regression
             slope, intercept, r, p, se = sts.linregress(bv_v-np.mean(bv_v), nv_v-np.mean(nv_v))
             x_fit = np.array([bv_v.min() - np.mean(bv_v), bv_v.max() - np.mean(bv_v)])
-            star = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
+            star = p_to_stars(p)
             ax.plot(x_fit, intercept + slope * x_fit, color=c, lw=1.5,
                     label=f'{task_name}: r={r:.3f}, p={p:.3f} {star}')
 
@@ -535,7 +543,7 @@ def plot_behavior_neural_bars(results, beh_dist):
         pb = np.concatenate(pooled_b)
         slope, intercept, r, p, se = sts.linregress(pb, pn)
         x_fit = np.array([pb.min(), pb.max()])
-        star = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
+        star = p_to_stars(p)
         ax.plot(x_fit, intercept + slope * x_fit, color='k', lw=2,
                 label=f'All tasks: r={r:.3f}, p={p:.3f} {star}')
 
@@ -833,3 +841,334 @@ def plot_global_alignment(reduced, epoch_idx, stim_colors=None,
     if title:
         ax.set_title(title, fontsize=10)
     plt.tight_layout()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# draw_* helpers — take a provided ax (for composite figures)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n_conds):
+    """Draw per-task Procrustes-aligned 3-D grand-mean with surface patches."""
+    enames = task_result['enames']
+    lim = task_result['lim']
+    n_ep = len(plot_epochs)
+
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
+
+    for ename in plot_epochs:
+        ei = enames.index(ename)
+        epoch_idx = np.arange(ei, n_conds * n_ep, n_ep)
+        ec = epoch_colors[ename]
+        mean_pts = task_result['grand_mean'][epoch_idx]
+
+        plot_surface_patch(ax, mean_pts, color=ec, alpha=0.2)
+
+        loop = np.vstack([mean_pts, mean_pts[0:1]])
+        ax.plot(loop[:, 0], loop[:, 1], loop[:, 2], '-', color=ec,
+                lw=2.5, alpha=0.6, zorder=1)
+        for i in range(len(mean_pts)):
+            ax.scatter(mean_pts[i, 0], mean_pts[i, 1], mean_pts[i, 2],
+                       s=60, color='k', alpha=1.0,
+                       edgecolors=stim_colors[i], linewidths=1.5,
+                       zorder=2, clip_on=False)
+
+        wall_projections(ax, mean_pts, color=ec, alpha=0.15)
+        wall_surface_projections(ax, mean_pts, color=ec, alpha=0.10)
+
+    ax.set_xticks([]); ax.set_yticks([]); ax.set_zticks([])
+    ax.set_xlabel(''); ax.set_ylabel(''); ax.set_zlabel('')
+    ax.xaxis.set_pane_color((1, 1, 1, 0))
+    ax.yaxis.set_pane_color((1, 1, 1, 0))
+    ax.zaxis.set_pane_color((1, 1, 1, 0))
+
+
+def draw_cross_task_bars(ax, ct_results, cat_colors=None):
+    """Bar chart of mean Procrustes distance per cross-task category."""
+    cat_means = ct_results['cat_means']
+    cat_names = ct_results['cat_names']
+    if cat_colors is None:
+        cat_colors = ['#4CAF50', '#2196F3', '#FF9800', '#F44336']
+    means = [np.nanmean(cat_means[c]) for c in cat_names]
+    sems = [np.nanstd(cat_means[c]) for c in cat_names]
+    ax.bar(range(len(cat_names)), means, yerr=sems, capsize=5, color=cat_colors,
+           alpha=0.7, edgecolor='k', linewidth=0.5)
+    ymin = min(m - s for m, s in zip(means, sems))
+    ax.set_ylim(bottom=ymin * 0.9)
+    ax.set_xticks(range(len(cat_names)))
+    ax.set_xticklabels(cat_names, fontsize=7)
+    ax.set_ylabel('')
+    ax.set_yticks([])
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+
+
+def draw_cross_age_bars(ax, indiv_results, task_colors):
+    """Bar plot of adjusted same-age cross-monkey distance with pooled bar."""
+    task_names = list(indiv_results.keys())
+    means, sems, pvals, labels = [], [], [], []
+    all_adj = []
+    for name in task_names:
+        ca = indiv_results[name]['cross_age']
+        adj = ca['same_age_adj']
+        all_adj.append(adj)
+        means.append(np.nanmean(adj))
+        sems.append(np.nanstd(adj) / np.sqrt(np.sum(np.isfinite(adj))))
+        pvals.append(ca['p_val'])
+        labels.append(name)
+    # Pooled
+    pooled_adj = np.concatenate(all_adj)
+    pooled_mean = np.nanmean(pooled_adj)
+    pooled_sem = np.nanstd(pooled_adj) / np.sqrt(np.sum(np.isfinite(pooled_adj)))
+    _, pooled_p = sts.ttest_1samp(pooled_adj, 0, nan_policy='omit')
+    means.append(pooled_mean); sems.append(pooled_sem); pvals.append(pooled_p)
+    labels.append('All tasks')
+    colors = [task_colors.get(n, 'C0') for n in task_names] + ['k']
+
+    x = np.arange(len(labels))
+    ax.bar(x, means, yerr=sems, capsize=5, color=colors, alpha=0.7,
+           edgecolor='k', linewidth=0.5)
+    ax.axhline(0, color='k', ls='--', lw=1)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=7)
+    ax.set_ylabel('')
+    ax.set_yticks([])
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ylim = max(abs(m) + s for m, s in zip(means, sems)) + 0.02
+    ax.set_ylim(-ylim, ylim)
+
+    for i, (m, s, p) in enumerate(zip(means, sems, pvals)):
+        star = p_to_stars(p)
+        y_pos = m + s + 0.003 if m >= 0 else m - s - 0.003
+        va = 'bottom' if m >= 0 else 'top'
+        ax.text(i, y_pos, star, ha='center', va=va, fontsize=7, fontweight='bold')
+
+    arrow_x = -0.55
+    ax.annotate('', xy=(arrow_x, ylim * 0.85), xytext=(arrow_x, 0),
+                arrowprops=dict(arrowstyle='->', color='0.4', lw=1.5))
+    ax.annotate('', xy=(arrow_x, -ylim * 0.85), xytext=(arrow_x, 0),
+                arrowprops=dict(arrowstyle='->', color='0.4', lw=1.5))
+    ax.text(arrow_x + 0.15, ylim * 0.5, 'different individuals\n(same age)', fontsize=8,
+            color='0.4', va='center', ha='center')
+    ax.text(arrow_x + 0.15, -ylim * 0.5, 'different ages\n(same individual)', fontsize=8,
+            color='0.4', va='center', ha='center')
+    ax.set_xlim(left=-1.0)
+
+
+def draw_cross_monkey_scatter(ax, results_by_group, pooled, age_group_labels, task_colors):
+    """Jittered scatter + regression of cross-monkey distance by age group."""
+    n_groups = len(age_group_labels)
+    task_names = list(results_by_group.keys())
+    offsets = np.linspace(-0.15, 0.15, len(task_names))
+
+    for ti, task_name in enumerate(task_names):
+        R = results_by_group[task_name]
+        c = task_colors[task_name]
+
+        all_g, all_d = [], []
+        for g in range(n_groups):
+            dists = R['group_dists'][g]
+            all_g.extend([g] * len(dists))
+            all_d.extend(dists)
+        all_g = np.array(all_g)
+        all_d = np.array(all_d)
+
+        rng = np.random.default_rng(ti)
+        x_jitter = all_g + offsets[ti] + rng.uniform(-0.05, 0.05, len(all_g))
+        ax.scatter(x_jitter, all_d, color=c, alpha=0.3, s=15, edgecolors='none')
+
+        group_means = [np.nanmean(R['group_dists'][g]) if len(R['group_dists'][g]) > 0
+                       else np.nan for g in range(n_groups)]
+        group_sems = [np.nanstd(R['group_dists'][g]) / np.sqrt(len(R['group_dists'][g]))
+                      if len(R['group_dists'][g]) > 1 else 0 for g in range(n_groups)]
+        x_off = np.arange(n_groups) + offsets[ti]
+        ax.errorbar(x_off, group_means, yerr=group_sems, fmt='o', color=c,
+                    capsize=4, markersize=5, zorder=5)
+
+        xfit = np.array([0, n_groups - 1]) + offsets[ti]
+        ax.plot(xfit, R['intercept'] + R['slope'] * np.array([0, n_groups - 1]),
+                color=c, ls='--', lw=1.5,
+                label=f'{task_name}: p={R["p"]:.4f}')
+
+    ax.plot([0, n_groups - 1],
+            [pooled['intercept'], pooled['intercept'] + pooled['slope'] * (n_groups - 1)],
+            color='k', ls='-', lw=2,
+            label=f'All: p={pooled["p"]:.4f}')
+
+    ax.set_xticks(range(n_groups))
+    ax.set_xticklabels(age_group_labels, fontsize=8)
+    ax.set_ylabel('')
+    ax.set_yticks([])
+    ax.legend(fontsize=6)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+
+
+def draw_neural_vs_behavior(ax, indiv_results, beh_dist, measure, task_colors,
+                            xlabel=None, show_ylabel=True, show_left_spine=True):
+    """Scatter + regression of neural vs behavioral (DI or RT) distances."""
+    from .procrustes import _upper_tri
+
+    task_names = list(indiv_results.keys())
+    pooled_n, pooled_b = [], []
+
+    for task_name in task_names:
+        nv = _upper_tri(indiv_results[task_name]['dist'])
+        bv = _upper_tri(beh_dist[task_name][measure])
+        valid = np.isfinite(nv) & np.isfinite(bv)
+        nv_v = nv[valid] - np.mean(nv[valid])
+        bv_v = bv[valid] - np.mean(bv[valid])
+
+        c = task_colors[task_name]
+        ax.scatter(bv_v, nv_v, color=c, alpha=0.35, s=18, edgecolors='none')
+
+        slope, intercept, r, p, se = sts.linregress(bv_v, nv_v)
+        x_fit = np.array([bv_v.min(), bv_v.max()])
+        star = p_to_stars(p)
+        ax.plot(x_fit, intercept + slope * x_fit, color=c, lw=1.5,
+                label=f'{task_name}: r={r:.3f} {star}')
+
+        pooled_n.append(nv_v)
+        pooled_b.append(bv_v)
+
+    pn = np.concatenate(pooled_n)
+    pb = np.concatenate(pooled_b)
+    slope, intercept, r, p, se = sts.linregress(pb, pn)
+    x_fit = np.array([pb.min(), pb.max()])
+    star = p_to_stars(p)
+    ax.plot(x_fit, intercept + slope * x_fit, color='k', lw=2,
+            label=f'All: r={r:.3f} {star}')
+
+    if xlabel is not None:
+        ax.set_xlabel(xlabel, fontsize=8)
+    ax.set_ylabel('Neural distance' if show_ylabel else '', fontsize=8)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.legend(fontsize=6)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    if not show_left_spine:
+        ax.spines['left'].set_visible(False)
+
+
+def draw_cross_epoch_vs_behavior(ax, cross_epoch, cross_epoch_defs, beh_df, monkey_edges,
+                                 comparison_label, measure, task_colors,
+                                 xlabel=None, ylabel=None, show_left_spine=True):
+    """Scatter + Spearman regression of cross-epoch distance vs DI or RT."""
+    from .behavior import get_behavioral_values
+
+    all_d, all_beh = [], []
+    for task_name in cross_epoch_defs:
+        rows = cross_epoch[task_name].get(comparison_label, [])
+        if not rows:
+            continue
+        entries = [{'monkey': r['monkey'], 'group': r['group']} for r in rows]
+        di_vals, rt_vals = get_behavioral_values(beh_df, entries, task_name, monkey_edges)
+        beh_vals = di_vals if measure == 'DI' else rt_vals
+        dists = np.array([r['distance'] for r in rows])
+        valid = np.isfinite(beh_vals)
+        d_sub = dists[valid] - np.mean(dists[valid])
+        b_sub = beh_vals[valid] - np.mean(beh_vals[valid])
+        c = task_colors[task_name]
+        ax.scatter(d_sub, b_sub, c=c, s=30, alpha=0.7, edgecolors='k', linewidth=0.3)
+        all_d.extend(d_sub)
+        all_beh.extend(b_sub)
+
+    all_d = np.array(all_d)
+    all_beh = np.array(all_beh)
+    if len(all_d) >= 3:
+        rho, p = sts.spearmanr(all_d, all_beh)
+        m, b = np.polyfit(all_d, all_beh, 1)
+        x_line = np.linspace(all_d.min(), all_d.max(), 50)
+        star = p_to_stars(p)
+        ax.plot(x_line, m * x_line + b, 'k-', lw=1.5, alpha=0.8)
+        ax.set_title(f'{measure} (\u03c1={rho:.3f} {star})', fontsize=8)
+
+    ax.set_xticks([])
+    ax.set_yticks([])
+    if xlabel is not None:
+        ax.set_xlabel(xlabel, fontsize=7)
+    if ylabel is not None:
+        ax.set_ylabel(ylabel, fontsize=8)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    if not show_left_spine:
+        ax.spines['left'].set_visible(False)
+
+
+def draw_correlation_matrices(fig, gs_slot, cross_epoch, cross_epoch_defs, beh_df,
+                              monkey_edges, pairs, pos_map):
+    """Summary Spearman rho matrices (DI, RT) with shared horizontal colorbar."""
+    from .behavior import get_behavioral_values
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import ScalarMappable
+
+    gs_inner = gs_slot.subgridspec(2, 2, height_ratios=[0.12, 1], hspace=0.15, wspace=0.35)
+    ax_cb = fig.add_subplot(gs_inner[0, :])
+    ax_di_mat = fig.add_subplot(gs_inner[1, 0])
+    ax_rt_mat = fig.add_subplot(gs_inner[1, 1])
+
+    rho_vals = {}
+    p_vals_mat = {}
+    for beh_name in ['DI', 'RT']:
+        rhos, ps = [], []
+        for ea, eb in pairs:
+            label = f'{ea}\u2192{eb}'
+            all_d, all_beh = [], []
+            for task_name in cross_epoch_defs:
+                rows = cross_epoch[task_name].get(label, [])
+                if not rows:
+                    continue
+                entries = [{'monkey': r['monkey'], 'group': r['group']} for r in rows]
+                di_vals, rt_vals = get_behavioral_values(beh_df, entries, task_name, monkey_edges)
+                beh_vals = di_vals if beh_name == 'DI' else rt_vals
+                dists = np.array([r['distance'] for r in rows])
+                valid = np.isfinite(beh_vals)
+                all_d.extend(dists[valid] - np.mean(dists[valid]))
+                all_beh.extend(beh_vals[valid] - np.mean(beh_vals[valid]))
+            if len(all_d) >= 3:
+                rho, p = sts.spearmanr(all_d, all_beh)
+                rhos.append(rho)
+                ps.append(p)
+            else:
+                rhos.append(np.nan)
+                ps.append(np.nan)
+        rho_vals[beh_name] = rhos
+        p_vals_mat[beh_name] = ps
+
+    cmap = plt.cm.RdBu_r
+    norm = Normalize(vmin=-1, vmax=1)
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+
+    fig.colorbar(sm, cax=ax_cb, orientation='horizontal', label='Spearman \u03c1')
+    ax_cb.xaxis.set_ticks_position('top')
+    ax_cb.xaxis.set_label_position('top')
+    ax_cb.tick_params(labelsize=5)
+
+    for ax_mat, beh_name in [(ax_di_mat, 'DI'), (ax_rt_mat, 'RT')]:
+        for k, (r, c) in pos_map.items():
+            rho = rho_vals[beh_name][k]
+            p = p_vals_mat[beh_name][k]
+            color = cmap(norm(rho)) if np.isfinite(rho) else 'lightgrey'
+            ax_mat.add_patch(plt.Rectangle((c, r), 1, 1, facecolor=color,
+                                            edgecolor='k', linewidth=1.5))
+            if np.isfinite(rho):
+                stars = p_to_stars(p, ns_label='')
+                ax_mat.text(c + 0.5, r + 0.5, f'{rho:.2f}{stars}',
+                            ha='center', va='center', fontsize=8, fontweight='bold')
+
+        ax_mat.text(0.5, 1.5, 'delay', ha='center', va='center', fontsize=6)
+        ax_mat.set_xlim(0, 2)
+        ax_mat.set_ylim(2, 0)
+        ax_mat.set_xticks([1.5])
+        ax_mat.set_xticklabels(['response'], fontsize=6)
+        ax_mat.set_yticks([0.5])
+        ax_mat.set_yticklabels(['cue'], fontsize=6)
+        ax_mat.tick_params(length=0)
+        ax_mat.set_aspect('equal')
+        ax_mat.set_title(beh_name, fontsize=8)
+        ax_mat.spines[:].set_visible(False)
