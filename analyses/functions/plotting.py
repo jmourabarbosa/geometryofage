@@ -855,11 +855,14 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
 
     ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
 
-    # Floor plane edges (draw first so data renders on top)
+    # Floor plane edges + vertical back edges (draw first so data renders on top)
     _lw, _c = 0.5, 'k'
     ax.plot([lim, lim], [-lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
     ax.plot([-lim, lim], [lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
     ax.plot([-lim, -lim], [-lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
+    # Vertical z edges at back corners
+    ax.plot([-lim, -lim], [lim, lim], [-lim, lim], color=_c, lw=_lw, zorder=0)
+    ax.plot([lim, lim], [lim, lim], [-lim, lim], color=_c, lw=_lw, zorder=0)
 
     for ename in plot_epochs:
         ei = enames.index(ename)
@@ -874,7 +877,7 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
                 lw=2.5, alpha=0.6, zorder=5)
         for i in range(len(mean_pts)):
             ax.scatter(mean_pts[i, 0], mean_pts[i, 1], mean_pts[i, 2],
-                       s=60, color='k', alpha=1.0,
+                       s=35, color='k', alpha=1.0,
                        edgecolors=stim_colors[i], linewidths=1.5,
                        zorder=10, clip_on=False)
 
