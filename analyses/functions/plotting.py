@@ -877,9 +877,10 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
 
     ax.set_xticks([]); ax.set_yticks([]); ax.set_zticks([])
     ax.set_xlabel(''); ax.set_ylabel(''); ax.set_zlabel('')
-    ax.xaxis.set_pane_color((1, 1, 1, 0))
-    ax.yaxis.set_pane_color((1, 1, 1, 0))
-    ax.zaxis.set_pane_color((1, 1, 1, 0))
+    _pane = (0.95, 0.95, 0.95, 1.0)
+    ax.xaxis.set_pane_color(_pane)  # yz plane
+    ax.yaxis.set_pane_color(_pane)  # xz plane
+    ax.zaxis.set_pane_color(_pane)  # xy plane (floor)
 
 
 def draw_cross_task_bars(ax, ct_results, cat_colors=None):
