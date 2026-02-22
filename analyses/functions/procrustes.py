@@ -88,3 +88,25 @@ def procrustes_distance_matrix(entries):
             dist[j, i] = d
 
     return dist
+
+
+def procrustes_disparity(A, B):
+    """Compute Procrustes disparity between two matrices.
+
+    Parameters
+    ----------
+    A, B : ndarray, shape (n_points, n_dims)
+
+    Returns
+    -------
+    d : float
+        Procrustes disparity.
+    """
+    _, _, d = procrustes(A, B)
+    return d
+
+
+def _upper_tri(mat):
+    """Extract upper triangle (excluding diagonal) as 1-D array."""
+    idx = np.triu_indices(mat.shape[0], k=1)
+    return mat[idx]

@@ -7,28 +7,12 @@ import warnings
 
 from .representations import build_representations
 from .procrustes import procrustes_distance_matrix
-from .analysis import extract_entry_arrays
-
-
-def rates_to_psth(rates):
-    """Convert rates list-of-lists to (n_neurons, n_conditions, n_bins) array."""
-    n_neurons = len(rates)
-    n_conds = len(rates[0])
-    n_bins = next(
-        rates[i][c].shape[1]
-        for i in range(n_neurons) for c in range(n_conds)
-        if rates[i][c].shape[0] > 0
-    )
-    psth = np.full((n_neurons, n_conds, n_bins), np.nan)
-    for i in range(n_neurons):
-        for c in range(n_conds):
-            if rates[i][c].shape[0] > 0:
-                psth[i, c] = np.nanmean(rates[i][c], axis=0)
-    return psth
+from .representations import extract_entry_arrays
 
 
 def _sliding_procrustes(psth, bc, ids, age_group, pair_fn,
-                        n_pcs, min_neurons, window_ms, step_ms, n_boot):
+                        n_pcs, min_neurons, window_ms, step_ms, n_boot,
+                        verbose=True):
     """Core sliding window loop: build representations, compute Procrustes,
     bootstrap selected pairs at each time step.
 
@@ -52,7 +36,8 @@ def _sliding_procrustes(psth, bc, ids, age_group, pair_fn,
             n_pcs=n_pcs, min_neurons=min_neurons, zscore=True
         )
         if len(entries_t) < 3:
-            print(f'Time {window_centers[ti]:.1f} ms: not enough entries ({len(entries_t)})')
+            if verbose:
+                print(f'Time {window_centers[ti]:.1f} ms: not enough entries ({len(entries_t)})')
             continue
 
         dist_t = procrustes_distance_matrix(entries_t)

@@ -31,8 +31,6 @@ def load_behavioral_data(sac_path, sac_odrd_path=None):
         with Monkey, Task='ODRd', age_month, DI (mean), RT (mean).
     """
     df = pd.read_csv(sac_path)
-    df['age_month'] = df['age_month']  # already present
-
     if sac_odrd_path is not None:
         odrd = pd.read_csv(sac_odrd_path)
         odrd = odrd.rename(columns={'ID': 'Monkey'})
@@ -149,11 +147,3 @@ def get_behavioral_values(beh_df, entries, task_name, monkey_edges):
             di_vals[idx] = np.nanmean(rows[DI_COLS_8].values)
             rt_vals[idx] = np.nanmean(rows[RT_COLS_8].values)
     return di_vals, rt_vals
-
-
-def _upper_tri(mat):
-    """Extract upper triangle (excluding diagonal) as 1-D array."""
-    idx = np.triu_indices(mat.shape[0], k=1)
-    return mat[idx]
-
-

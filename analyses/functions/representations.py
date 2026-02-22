@@ -61,7 +61,7 @@ def pca_reduce(X, n_pcs):
     """
     n_neurons, n_features = X.shape
     
-    n_pcs_actual = n_pcs #min(n_pcs, n_neurons, n_features)
+    n_pcs_actual = min(n_pcs, n_neurons, n_features)
 
     pca = PCA(n_components=n_pcs_actual)
     projected = pca.fit_transform(X.T).T  # (n_pcs_actual, n_features)
@@ -185,3 +185,19 @@ def build_representations(tuning, ids, groups, n_pcs, min_neurons=10, zscore=Tru
     return entries
 
 
+def extract_entry_arrays(entries):
+    """Extract monkey and group arrays from entries list.
+
+    Parameters
+    ----------
+    entries : list of dict
+        Each dict must have 'monkey' and 'group' keys.
+
+    Returns
+    -------
+    monkeys : ndarray of str
+    groups : ndarray of int
+    """
+    monkeys = np.array([e['monkey'] for e in entries])
+    groups = np.array([e['group'] for e in entries])
+    return monkeys, groups

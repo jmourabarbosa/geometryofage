@@ -16,12 +16,22 @@ from functions.representations import (zscore_neurons, pca_reduce, build_represe
 from functions.procrustes import procrustes_distance_matrix
 from functions.analysis import (assign_age_groups, assign_per_monkey_age_groups,
                                 cross_monkey_analysis, cross_age_analysis,
-                                extract_entry_arrays, _mean_within_monkey)
-from functions.temporal import rates_to_psth, temporal_cross_monkey, temporal_cross_age
+                                _mean_within_monkey)
+from functions.representations import extract_entry_arrays
+from functions.psth import rates_to_psth
+from functions.temporal import temporal_cross_monkey, temporal_cross_age
 from functions.plotting import (_baseline_normalize, plot_cross_monkey, plot_distance_matrices,
                                 plot_cross_age, plot_temporal,
-                                plot_cross_task,
-                                plot_3d_representation, wall_projections)
+                                plot_cross_task, print_cross_task_summary,
+                                plot_cross_monkey_by_group, print_cross_monkey_by_group_summary,
+                                plot_3d_representation, wall_projections,
+                                plot_3d_grid, plot_within_monkey_alignment,
+                                plot_global_alignment, plot_cross_epoch_correlations,
+                                TASK_COLORS, STIM_COLORS, STIM_LABELS,
+                                AGE_COLORS, AGE_GROUP_LABELS)
+from functions.load_data import (CARDINAL_COLS, TASK_EPOCHS,
+                                 filter_common_monkeys, load_cardinal_task_data)
+from functions.analysis import (build_epoch_representations, cross_epoch_distances)
 from functions.representations import tuning_to_matrix
 
 
@@ -475,7 +485,7 @@ class TestComputeFlatTuning:
 
 class TestCrossTaskCv:
     def test_output_keys(self):
-        from functions.cross_task import cross_task_cv
+        from functions.analysis import cross_task_cv
 
         rng = np.random.default_rng(0)
         n = 60
@@ -510,7 +520,7 @@ class TestCrossTaskCv:
         assert len(results['cat_names']) == 4
 
     def test_three_tasks(self):
-        from functions.cross_task import cross_task_cv
+        from functions.analysis import cross_task_cv
 
         rng = np.random.default_rng(0)
         n = 60
@@ -534,7 +544,7 @@ class TestCrossTaskCv:
 class TestPlotCrossTask:
     def test_smoke(self):
         import matplotlib.pyplot as plt
-        from functions.cross_task import CAT_NAMES
+        from functions.analysis import CAT_NAMES
 
         rng = np.random.default_rng(0)
         n_iter = 5
@@ -551,7 +561,7 @@ class TestPlotCrossTask:
 
     def test_smoke_three_pairs(self):
         import matplotlib.pyplot as plt
-        from functions.cross_task import CAT_NAMES
+        from functions.analysis import CAT_NAMES
 
         rng = np.random.default_rng(0)
         n_iter = 5
@@ -667,4 +677,190 @@ class TestWallProjections:
         pts = np.random.default_rng(0).standard_normal((4, 3))
         ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2])
         wall_projections(ax, pts)
+        plt.close('all')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# New functions: pca_reduce fix, constants, filter, cross-epoch, plotting
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPcaReduceFix:
+    """Verify pca_reduce handles n_pcs > min(n_neurons, n_features) via padding."""
+
+    def test_pads_when_fewer_neurons(self):
+        X = np.random.default_rng(0).standard_normal((3, 8))
+        proj, var = pca_reduce(X, 8)
+        assert proj.shape == (8, 8)
+        np.testing.assert_array_equal(proj[3:], 0)
+
+    def test_pads_when_fewer_features(self):
+        X = np.random.default_rng(0).standard_normal((50, 3))
+        proj, var = pca_reduce(X, 8)
+        assert proj.shape == (8, 3)
+        np.testing.assert_array_equal(proj[3:], 0)
+
+    def test_no_padding_when_enough(self):
+        X = np.random.default_rng(0).standard_normal((50, 8))
+        proj, var = pca_reduce(X, 4)
+        assert proj.shape == (4, 8)
+        assert not np.all(proj == 0)
+
+
+class TestConstants:
+    def test_task_colors_hex(self):
+        for name, color in TASK_COLORS.items():
+            assert color.startswith('#'), f'{name} color not hex: {color}'
+
+    def test_cardinal_cols(self):
+        assert CARDINAL_COLS == [0, 2, 4, 6]
+
+    def test_task_epochs_keys(self):
+        assert 'ODR 1.5s' in TASK_EPOCHS
+        assert 'ODR 3.0s' in TASK_EPOCHS
+        assert 'ODRd' in TASK_EPOCHS
+        for v in TASK_EPOCHS.values():
+            assert 't_range' in v
+            assert 'epochs' in v
+
+    def test_stim_colors_labels_match(self):
+        assert len(STIM_COLORS) == len(STIM_LABELS) == 4
+
+    def test_age_colors_labels_match(self):
+        assert len(AGE_COLORS) == len(AGE_GROUP_LABELS) == 3
+
+
+class TestFilterCommonMonkeys:
+    def test_basic(self):
+        task_data = {
+            'T1': {'ids': np.array(['A', 'B', 'C', 'A']),
+                    'data': np.zeros((4, 8))},
+            'T2': {'ids': np.array(['B', 'C', 'D', 'B']),
+                    'data': np.zeros((4, 8))},
+        }
+        filtered, common = filter_common_monkeys(task_data)
+        assert common == ['B', 'C']
+        assert len(filtered['T1']['ids']) == 2  # B and C
+        assert len(filtered['T2']['ids']) == 3  # B, C, B
+
+    def test_subset_tasks(self):
+        task_data = {
+            'T1': {'ids': np.array(['A', 'B']), 'data': np.zeros((2, 8))},
+            'T2': {'ids': np.array(['B', 'C']), 'data': np.zeros((2, 8))},
+            'T3': {'ids': np.array(['A', 'B']), 'data': np.zeros((2, 8))},
+        }
+        filtered, common = filter_common_monkeys(task_data, task_names=['T1', 'T3'])
+        assert common == ['A', 'B']
+        assert set(filtered.keys()) == {'T1', 'T3'}
+
+
+class TestCrossEpochDistances:
+    def test_basic(self):
+        rng = np.random.default_rng(42)
+        # Build fake epoch_reps
+        epoch_reps = {'TaskA': {}}
+        for ename in ['cue', 'delay']:
+            epoch_reps['TaskA'][ename] = {}
+            for mid in ['M0', 'M1']:
+                for g in [0, 1]:
+                    epoch_reps['TaskA'][ename][(mid, g)] = {
+                        'matrix': rng.standard_normal((4, 8)),
+                    }
+
+        comparisons = [('cue', 'delay')]
+        result = cross_epoch_distances(epoch_reps, comparisons)
+        assert 'TaskA' in result
+        assert 'cue\u2192delay' in result['TaskA']
+        rows = result['TaskA']['cue\u2192delay']
+        assert len(rows) == 4  # 2 monkeys x 2 groups
+        assert all('distance' in r for r in rows)
+        assert all(r['distance'] > 0 for r in rows)
+
+
+class TestPrintCrossTaskSummary:
+    def test_smoke(self, capsys):
+        from functions.analysis import CAT_NAMES
+        rng = np.random.default_rng(0)
+        n_iter = 5
+        results = {
+            'cat_means': {c: rng.uniform(0.1, 0.5, n_iter) for c in CAT_NAMES},
+            'mantel_r': {('Task A', 'Task B'): rng.uniform(0.5, 0.9, n_iter)},
+            'cat_names': CAT_NAMES,
+        }
+        print_cross_task_summary(results)
+        captured = capsys.readouterr()
+        assert 'Category means' in captured.out
+        assert 'Mantel r' in captured.out
+
+
+class TestPrintCrossMonkeyByGroupSummary:
+    def test_smoke(self, capsys):
+        results = {
+            'ODR 1.5s': {
+                'common': ['M0', 'M1'],
+                'n_monkeys': 3,
+                'n_neurons': 50,
+                'n_total': 100,
+                'group_dists': {0: np.array([0.1, 0.2]), 1: np.array([0.3])},
+                'slope': 0.05,
+                'se': 0.01,
+                'r': 0.5,
+                'p': 0.03,
+            }
+        }
+        pooled = {'slope': 0.04, 'se': 0.008, 'r': 0.6, 'p': 0.01}
+        print_cross_monkey_by_group_summary(results, pooled, ['young', 'old'])
+        captured = capsys.readouterr()
+        assert 'ODR 1.5s' in captured.out
+        assert 'All tasks pooled' in captured.out
+
+
+class TestPlot3dGrid:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        reduced = {
+            'M0': {0: {'tc': rng.standard_normal((4, 4, 2)),
+                        'n_neurons': 20, 'var_explained': 0.7}},
+            'M1': {0: {'tc': rng.standard_normal((4, 4, 2)),
+                        'n_neurons': 20, 'var_explained': 0.7}},
+        }
+        plot_3d_grid(reduced, epoch_idx=0)
+        plt.close('all')
+
+
+class TestPlotWithinMonkeyAlignment:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        reduced = {
+            'M0': {
+                0: {'tc': rng.standard_normal((4, 4, 2)),
+                    'n_neurons': 20, 'var_explained': 0.7},
+                1: {'tc': rng.standard_normal((4, 4, 2)),
+                    'n_neurons': 20, 'var_explained': 0.7},
+            },
+        }
+        epoch_idx = np.arange(0, 8, 2)  # cue indices
+        plot_within_monkey_alignment(reduced, epoch_idx)
+        plt.close('all')
+
+
+class TestPlotGlobalAlignment:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        reduced = {
+            'M0': {
+                0: {'tc': rng.standard_normal((4, 4, 2)),
+                    'n_neurons': 20, 'var_explained': 0.7},
+                1: {'tc': rng.standard_normal((4, 4, 2)),
+                    'n_neurons': 20, 'var_explained': 0.7},
+            },
+            'M1': {
+                0: {'tc': rng.standard_normal((4, 4, 2)),
+                    'n_neurons': 20, 'var_explained': 0.7},
+            },
+        }
+        epoch_idx = np.arange(0, 8, 2)
+        plot_global_alignment(reduced, epoch_idx)
         plt.close('all')

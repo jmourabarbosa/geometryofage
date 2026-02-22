@@ -7,12 +7,18 @@ import matplotlib.pyplot as plt
 import scipy.stats as sts
 
 
+# See also TASK_EPOCHS in load_data.py for analysis epoch windows.
 TASK_EVENTS = {
     'ODR 1.5s': {'Cue': 0, 'Delay': 500, 'Resp': 2000},
     'ODR 3.0s': {'Cue': 0, 'Delay': 500, 'Resp': 3000},
     'ODRd':     {'Cue': 0, 'Delay': 500, 'Dist': 1700, 'Resp': 3000},
 }
-TASK_COLORS = {'ODR 1.5s': 'C0', 'ODR 3.0s': 'C1', 'ODRd': 'C2'}
+TASK_COLORS = {'ODR 1.5s': '#1b9e77', 'ODR 3.0s': '#d95f02', 'ODRd': '#7570b3'}
+
+STIM_COLORS = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3']
+STIM_LABELS = ['0°', '90°', '180°', '270°']
+AGE_COLORS = ['#1b9e77', '#d95f02', '#7570b3']
+AGE_GROUP_LABELS = ['young', 'middle', 'old']
 
 
 def plot_3d_representation(ax, pts, stim_colors, s=40, alpha=1.0,
@@ -35,22 +41,69 @@ def plot_3d_representation(ax, pts, stim_colors, s=40, alpha=1.0,
                    edgecolors=edge, linewidths=ew, zorder=2, clip_on=False)
 
 
-def wall_projections(ax, pts):
-    """Draw gray shadow projections on the 3 walls of a 3-D axis.
+def wall_projections(ax, pts, color='gray', alpha=0.15):
+    """Draw shadow projections on the 3 walls of a 3-D axis.
 
     Parameters
     ----------
     ax : Axes3D
     pts : ndarray, shape (n_points, 3)
+    color : str or tuple
+    alpha : float
     """
     loop = np.vstack([pts, pts[0:1]])
     xl, yl, zl = ax.get_xlim(), ax.get_ylim(), ax.get_zlim()
     ax.plot(loop[:, 0], loop[:, 1], np.full(len(loop), zl[0]),
-            color='gray', lw=2, alpha=0.15)
+            color=color, lw=2, alpha=alpha)
     ax.plot(loop[:, 0], np.full(len(loop), yl[1]), loop[:, 2],
-            color='gray', lw=2, alpha=0.15)
+            color=color, lw=2, alpha=alpha)
     ax.plot(np.full(len(loop), xl[0]), loop[:, 1], loop[:, 2],
-            color='gray', lw=2, alpha=0.15)
+            color=color, lw=2, alpha=alpha)
+
+
+def plot_surface_patch(ax, pts, color='lightsteelblue', alpha=0.25, n=12):
+    """Bilinear surface through 4 points arranged as a quad.
+
+    Parameters
+    ----------
+    ax : Axes3D
+    pts : ndarray, shape (4, 3)
+    color : str or tuple
+    alpha : float
+    n : int
+        Grid resolution.
+    """
+    u = np.linspace(0, 1, n)
+    v = np.linspace(0, 1, n)
+    U, V = np.meshgrid(u, v)
+    X = (1-U)*(1-V)*pts[0,0] + U*(1-V)*pts[1,0] + U*V*pts[2,0] + (1-U)*V*pts[3,0]
+    Y = (1-U)*(1-V)*pts[0,1] + U*(1-V)*pts[1,1] + U*V*pts[2,1] + (1-U)*V*pts[3,1]
+    Z = (1-U)*(1-V)*pts[0,2] + U*(1-V)*pts[1,2] + U*V*pts[2,2] + (1-U)*V*pts[3,2]
+    ax.plot_surface(X, Y, Z, color=color, alpha=alpha, shade=False, zorder=0)
+
+
+def wall_surface_projections(ax, pts, color='gray', alpha=0.10, n=12):
+    """Project bilinear surface patch onto the 3 walls of a 3-D axis.
+
+    Parameters
+    ----------
+    ax : Axes3D
+    pts : ndarray, shape (4, 3)
+    color : str or tuple
+    alpha : float
+    n : int
+        Grid resolution.
+    """
+    u = np.linspace(0, 1, n)
+    v = np.linspace(0, 1, n)
+    U, V = np.meshgrid(u, v)
+    X = (1-U)*(1-V)*pts[0,0] + U*(1-V)*pts[1,0] + U*V*pts[2,0] + (1-U)*V*pts[3,0]
+    Y = (1-U)*(1-V)*pts[0,1] + U*(1-V)*pts[1,1] + U*V*pts[2,1] + (1-U)*V*pts[3,1]
+    Z = (1-U)*(1-V)*pts[0,2] + U*(1-V)*pts[1,2] + U*V*pts[2,2] + (1-U)*V*pts[3,2]
+    xl, yl, zl = ax.get_xlim(), ax.get_ylim(), ax.get_zlim()
+    ax.plot_surface(X, Y, np.full_like(Z, zl[0]), color=color, alpha=alpha, shade=False, zorder=0)
+    ax.plot_surface(X, np.full_like(Y, yl[1]), Z, color=color, alpha=alpha, shade=False, zorder=0)
+    ax.plot_surface(np.full_like(X, xl[0]), Y, Z, color=color, alpha=alpha, shade=False, zorder=0)
 
 
 def plot_cross_monkey(results):
@@ -107,26 +160,16 @@ def plot_distance_matrices(results):
 
 
 def plot_cross_age(results):
-    """Histograms of within-age vs across-age distances (raw and adjusted)."""
+    """Histograms of adjusted same-age cross-monkey distances."""
     n_tasks = len(results)
-    fig, axes = plt.subplots(n_tasks, 2, figsize=(12, 4.5 * n_tasks))
+    fig, axes = plt.subplots(n_tasks, 1, figsize=(6, 4.5 * n_tasks))
+    if n_tasks == 1:
+        axes = [axes]
 
     for row, (task_name, R) in enumerate(results.items()):
         ca = R['cross_age']
 
-        # ax = axes[row, 0]
-        # ax.hist(ca['same_age_raw'], bins=12, alpha=0.6, density=True,
-        #         label=f'Same age (n={len(ca["same_age_raw"])})')
-        # ax.hist(ca['diff_age_raw'], bins=15, alpha=0.6, density=True,
-        #         label=f'Diff age (n={len(ca["diff_age_raw"])})')
-        # ax.axvline(np.nanmean(ca['same_age_raw']), color='C0', ls='--', lw=1.5)
-        # ax.axvline(np.nanmean(ca['diff_age_raw']), color='C1', ls='--', lw=1.5)
-        # ax.set_xlabel('Procrustes distance')
-        # ax.set_ylabel('Density')
-        # ax.set_title(f'{task_name} \u2014 cross-monkey pairs by age match')
-        # ax.legend(fontsize=8)
-
-        ax = axes[row, 0]
+        ax = axes[row]
         ax.hist(ca['same_age_adj'], bins=12, alpha=0.7, edgecolor='k')
         ax.axvline(0, color='r', ls='--', lw=1.5, label='0')
         ax.axvline(np.nanmean(ca['same_age_adj']), color='C0', ls='--', lw=1.5,
@@ -236,7 +279,19 @@ def plot_cross_task(results):
     plt.tight_layout()
     plt.show()
 
-    # Summary stats
+
+def print_cross_task_summary(results):
+    """Print summary statistics for cross-task CV results.
+
+    Parameters
+    ----------
+    results : dict
+        Output of cross_task_cv.
+    """
+    cat_means = results['cat_means']
+    cat_names = results['cat_names']
+    mantel_r = results['mantel_r']
+
     print('Category means [\u00b1SE]:')
     for c in cat_names:
         m = np.nanmean(cat_means[c])
@@ -288,21 +343,13 @@ def plot_cross_monkey_by_group(results, pooled, group_labels):
         R = results[task_name]
         c = TASK_COLORS[task_name]
 
-        print(f'{task_name}: {len(R["common"])}/{R["n_monkeys"]} monkeys in all '
-              f'{n_groups} groups ({R["common"]}), '
-              f'{R["n_neurons"]}/{R["n_total"]} neurons')
-
         all_g, all_d = [], []
         for g in range(n_groups):
             dists = R['group_dists'][g]
             all_g.extend([g] * len(dists))
             all_d.extend(dists)
-            print(f'  {group_labels[g]}: {len(dists)} pairs')
         all_g = np.array(all_g)
         all_d = np.array(all_d)
-
-        print(f'  regression: slope={R["slope"]:.4f} +/- {R["se"]:.4f}, '
-              f'r={R["r"]:.3f}, p={R["p"]:.4f}')
 
         # Left: scatter + mean/SEM + regression line
         rng = np.random.default_rng(ti)
@@ -328,9 +375,6 @@ def plot_cross_monkey_by_group(results, pooled, group_labels):
                          label=f'{task_name} (p={R["p"]:.4f})')
 
     # Pooled line and point
-    print(f'\nAll tasks pooled: slope={pooled["slope"]:.4f} +/- {pooled["se"]:.4f}, '
-          f'r={pooled["r"]:.3f}, p={pooled["p"]:.4f}')
-
     axes[0].plot([0, n_groups - 1],
                  [pooled['intercept'],
                   pooled['intercept'] + pooled['slope'] * (n_groups - 1)],
@@ -356,6 +400,31 @@ def plot_cross_monkey_by_group(results, pooled, group_labels):
 
     plt.tight_layout()
     plt.show()
+
+
+def print_cross_monkey_by_group_summary(results, pooled, group_labels):
+    """Print summary statistics for cross-monkey by group analysis.
+
+    Parameters
+    ----------
+    results : dict
+        Per-task output from cross_monkey_by_group.
+    pooled : dict
+        Pooled regression output from cross_monkey_by_group.
+    group_labels : list of str
+    """
+    n_groups = len(group_labels)
+    for task_name, R in results.items():
+        print(f'{task_name}: {len(R["common"])}/{R["n_monkeys"]} monkeys in all '
+              f'{n_groups} groups ({R["common"]}), '
+              f'{R["n_neurons"]}/{R["n_total"]} neurons')
+        for g in range(n_groups):
+            dists = R['group_dists'][g]
+            print(f'  {group_labels[g]}: {len(dists)} pairs')
+        print(f'  regression: slope={R["slope"]:.4f} +/- {R["se"]:.4f}, '
+              f'r={R["r"]:.3f}, p={R["p"]:.4f}')
+    print(f'\nAll tasks pooled: slope={pooled["slope"]:.4f} +/- {pooled["se"]:.4f}, '
+          f'r={pooled["r"]:.3f}, p={pooled["p"]:.4f}')
 
 
 def plot_cross_age_bars(results):
@@ -432,7 +501,7 @@ def plot_behavior_neural_bars(results, beh_dist):
     beh_dist : dict
         {task_name: dict(di_dist=..., rt_dist=...)} — behavioral distance matrices.
     """
-    from .behavior import _upper_tri
+    from .procrustes import _upper_tri
 
     measure_keys = {'DI': 'di_dist', 'RT': 'rt_dist'}
     task_names = list(results.keys())
@@ -516,3 +585,251 @@ def plot_age_distributions(task_data, age_edges=None):
         fig.suptitle(name, fontsize=11, fontweight='bold')
         plt.tight_layout()
         plt.show()
+
+
+def plot_cross_epoch_correlations(cross_epoch, beh_df, monkey_edges, task_epochs,
+                                   comparisons):
+    """Scatter + regression plots of cross-epoch distance vs behavioral measures.
+
+    Parameters
+    ----------
+    cross_epoch : dict
+        {task: {label: [dict(monkey, group, distance), ...]}}
+    beh_df : DataFrame
+        Behavioral data from load_behavioral_data.
+    monkey_edges : dict
+        {(task, monkey): tuple of edges}
+    task_epochs : dict
+        Task names (keys used for iteration order).
+    comparisons : list of tuple
+        Epoch pairs, e.g. [('cue', 'delay'), ('delay', 'response')].
+    """
+    from .behavior import get_behavioral_values
+
+    fig, axes = plt.subplots(2, len(comparisons), figsize=(14, 8))
+
+    for ci, (ea, eb) in enumerate(comparisons):
+        label = f'{ea}\u2192{eb}'
+
+        for ri, beh_name in enumerate(['DI', 'RT']):
+            ax = axes[ri, ci]
+            all_d, all_beh = [], []
+
+            for task_name in task_epochs:
+                if task_name not in cross_epoch:
+                    continue
+                rows = cross_epoch[task_name].get(label, [])
+                if not rows:
+                    continue
+
+                entries = [{'monkey': r['monkey'], 'group': r['group']}
+                           for r in rows]
+                di_vals, rt_vals = get_behavioral_values(
+                    beh_df, entries, task_name, monkey_edges)
+                beh_vals = di_vals if beh_name == 'DI' else rt_vals
+
+                dists = np.array([r['distance'] for r in rows])
+                valid = np.isfinite(beh_vals)
+
+                ax.scatter(dists[valid] - np.mean(dists[valid]),
+                           beh_vals[valid] - np.mean(beh_vals[valid]),
+                           c=TASK_COLORS[task_name], label=task_name,
+                           s=50, alpha=0.7, edgecolors='k', linewidth=0.5)
+
+                all_d.extend(dists[valid] - np.mean(dists[valid]))
+                all_beh.extend(beh_vals[valid] - np.mean(beh_vals[valid]))
+
+            all_d = np.array(all_d)
+            all_beh = np.array(all_beh)
+            if len(all_d) >= 3:
+                rho, p = sts.spearmanr(all_d, all_beh)
+                m, b = np.polyfit(all_d, all_beh, 1)
+                x_line = np.linspace(all_d.min(), all_d.max(), 50)
+                ax.plot(x_line, m * x_line + b, 'k-', lw=1.5, alpha=0.8)
+                ax.set_title(f'{label}: {beh_name} (\u03c1={rho:.3f}, p={p:.3f})',
+                             fontsize=9)
+            else:
+                ax.set_title(f'{label}: {beh_name}', fontsize=9)
+
+            ax.set_xlabel(f'Procrustes distance ({label})', fontsize=8)
+            ax.set_ylabel(beh_name, fontsize=8)
+            ax.tick_params(labelsize=7)
+            if ri == 0 and ci == 0:
+                ax.legend(fontsize=7)
+
+    fig.suptitle('Cross-epoch Procrustes distance vs behavioral measures',
+                 fontsize=11, y=1.02)
+    plt.tight_layout()
+
+
+def plot_3d_grid(reduced, epoch_idx, stim_colors=None, stim_labels=None,
+                 age_labels=None, title=''):
+    """Grid of individual 3D representations.
+
+    Parameters
+    ----------
+    reduced : dict
+        {monkey: {age_group: dict(tc=ndarray (n_pcs, n_conds, n_epochs), ...)}}
+    epoch_idx : int
+        Which epoch to plot (index into last dim of tc).
+    stim_colors : list
+    stim_labels : list
+    age_labels : list
+    title : str
+    """
+    if stim_colors is None:
+        stim_colors = STIM_COLORS
+    if stim_labels is None:
+        stim_labels = STIM_LABELS
+    if age_labels is None:
+        age_labels = AGE_GROUP_LABELS
+
+    n_plots = sum(len(g) for g in reduced.values())
+    ncols = min(n_plots, 5)
+    nrows = int(np.ceil(n_plots / ncols))
+    fig = plt.figure(figsize=(4 * ncols, 4 * nrows))
+
+    i = 1
+    for mid, groups in reduced.items():
+        for g, info in groups.items():
+            ax = fig.add_subplot(nrows, ncols, i, projection='3d')
+            tc = info['tc']
+            pts = tc[:3, :, epoch_idx].T  # (n_conds, 3)
+            plot_3d_representation(ax, pts, stim_colors)
+
+            g_label = age_labels[g] if g < len(age_labels) else str(g)
+            ax.set_title(f'{mid} / {g_label}', fontsize=8)
+            ax.set_xlabel('PC1', fontsize=7)
+            ax.set_ylabel('PC2', fontsize=7)
+            ax.set_zlabel('PC3', fontsize=7)
+            ax.tick_params(labelsize=6)
+            if i == 1:
+                from matplotlib.lines import Line2D
+                handles = [Line2D([0], [0], marker='o', color='w',
+                                  markerfacecolor=c, markersize=8, label=l)
+                           for c, l in zip(stim_colors, stim_labels)]
+                ax.legend(handles=handles, fontsize=6, loc='best')
+            i += 1
+
+    if title:
+        fig.suptitle(title, fontsize=12, y=1.01)
+    plt.tight_layout()
+
+
+def plot_within_monkey_alignment(reduced, epoch_idx, stim_colors=None,
+                                  stim_labels=None, title='', n_dims=3):
+    """Within-monkey Procrustes alignment of age groups.
+
+    Parameters
+    ----------
+    reduced : dict
+        {monkey: {age_group: dict(tc=...)}}
+    epoch_idx : ndarray
+        Indices into the flattened (n_conds * n_epochs) point matrix for the epoch.
+    stim_colors, stim_labels : list
+    title : str
+    n_dims : int
+    """
+    from .procrustes import generalized_procrustes
+    from .representations import tuning_to_matrix
+
+    if stim_colors is None:
+        stim_colors = STIM_COLORS
+    if stim_labels is None:
+        stim_labels = STIM_LABELS
+
+    monkeys_multi = [m for m in reduced if len(reduced[m]) > 1]
+    ncols = min(len(monkeys_multi), 4)
+    nrows = int(np.ceil(len(monkeys_multi) / ncols))
+    fig = plt.figure(figsize=(5 * ncols, 5 * nrows))
+
+    for idx, mid in enumerate(monkeys_multi):
+        groups_dict = reduced[mid]
+        group_ids = sorted(groups_dict.keys())
+        mats = [tuning_to_matrix(groups_dict[g], n_dims) for g in group_ids]
+        aligned, mean = generalized_procrustes(mats)
+
+        ax = fig.add_subplot(nrows, ncols, idx + 1, projection='3d')
+
+        for k, g in enumerate(group_ids):
+            pts = aligned[k][epoch_idx]
+            plot_3d_representation(ax, pts, stim_colors, s=25, alpha=0.35,
+                                   lw=1, edge='none')
+
+        mean_pts = mean[epoch_idx]
+        plot_3d_representation(ax, mean_pts, stim_colors, s=100, alpha=1.0,
+                               lw=2, edge='k', ew=0.8)
+        wall_projections(ax, mean_pts)
+
+        ax.set_title(mid, fontsize=10)
+        ax.set_xticks([]); ax.set_yticks([]); ax.set_zticks([])
+        ax.set_xlabel('PC1', fontsize=8)
+        ax.set_ylabel('PC2', fontsize=8)
+        ax.set_zlabel('PC3', fontsize=8)
+
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=c,
+                       markersize=8, label=l) for c, l in zip(stim_colors, stim_labels)]
+    fig.legend(handles=handles, loc='lower center', ncol=4, fontsize=9,
+               frameon=False, bbox_to_anchor=(0.5, -0.02))
+    if title:
+        fig.suptitle(title, fontsize=12, y=1.01)
+    plt.tight_layout()
+
+
+def plot_global_alignment(reduced, epoch_idx, stim_colors=None,
+                           stim_labels=None, title='', n_dims=3):
+    """Global Procrustes alignment of all monkey x age groups.
+
+    Parameters
+    ----------
+    reduced : dict
+        {monkey: {age_group: dict(tc=...)}}
+    epoch_idx : ndarray
+        Indices into the flattened point matrix for the epoch.
+    stim_colors, stim_labels : list
+    title : str
+    n_dims : int
+    """
+    from .procrustes import generalized_procrustes
+    from .representations import tuning_to_matrix
+
+    if stim_colors is None:
+        stim_colors = STIM_COLORS
+    if stim_labels is None:
+        stim_labels = STIM_LABELS
+
+    all_mats = []
+    for mid, groups_dict in reduced.items():
+        for g in sorted(groups_dict.keys()):
+            all_mats.append(tuning_to_matrix(groups_dict[g], n_dims))
+
+    aligned_all, grand_mean = generalized_procrustes(all_mats)
+
+    fig = plt.figure(figsize=(6, 6))
+    ax = fig.add_subplot(111, projection='3d')
+
+    for k in range(len(aligned_all)):
+        pts = aligned_all[k][epoch_idx]
+        for i in range(len(pts)):
+            ax.scatter(pts[i, 0], pts[i, 1], pts[i, 2],
+                       s=15, color=stim_colors[i], alpha=0.2,
+                       edgecolors='none', zorder=1, clip_on=False)
+
+    mean_pts = grand_mean[epoch_idx]
+    plot_3d_representation(ax, mean_pts, stim_colors, s=120, alpha=1.0,
+                           lw=2.5, edge='k', ew=0.8)
+    wall_projections(ax, mean_pts)
+
+    ax.set_xticks([]); ax.set_yticks([]); ax.set_zticks([])
+    ax.set_xlabel('PC1', fontsize=9)
+    ax.set_ylabel('PC2', fontsize=9)
+    ax.set_zlabel('PC3', fontsize=9)
+
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=c,
+                       markersize=8, label=l) for c, l in zip(stim_colors, stim_labels)]
+    ax.legend(handles=handles, fontsize=8, loc='upper left')
+    if title:
+        ax.set_title(title, fontsize=10)
+    plt.tight_layout()

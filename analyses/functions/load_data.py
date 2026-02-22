@@ -135,6 +135,19 @@ def extract_metadata(workspace, n_neurons):
 
 MONKEY_NAMES = ["OLI", "PIC", "QUA", "ROS", "SON", "TRI", "UNI", "VIK"]
 
+CARDINAL_COLS = [0, 2, 4, 6]
+
+# See also TASK_EVENTS in plotting.py for event onset times used in plots.
+TASK_EPOCHS = {
+    'ODR 1.5s': dict(t_range=(-1000, 2500),
+                     epochs={'cue': (0, 500), 'delay': (500, 2000), 'response': (2000, 2500)}),
+    'ODR 3.0s': dict(t_range=(-1000, 3500),
+                     epochs={'cue': (0, 500), 'delay': (500, 3000), 'response': (3000, 3500)}),
+    'ODRd':     dict(t_range=(-1000, 4000),
+                     epochs={'cue': (0, 500), 'delay': (500, 1700), 'distractor': (1700, 2200),
+                             'response': (3000, 3500)}),
+}
+
 
 def _extract_ids(workspace, n_neurons):
     """Find all monkey ID strings (UTF-16-LE) and return them in order."""
@@ -210,3 +223,81 @@ def load_all_task_data(data_dir):
     )
 
     return task_data
+
+
+def load_cardinal_task_data(data_dir):
+    """Load ODR and ODRd data with 4 cardinal directions only.
+
+    ODR 8-direction data is subselected to columns ``CARDINAL_COLS``.
+    ODRd raw 4-column data is used directly (not split by distractor).
+
+    Parameters
+    ----------
+    data_dir : str
+        Path to directory containing .mat files.
+
+    Returns
+    -------
+    task_data : dict
+        {task_name: dict(data, ids, abs_age)} for 'ODR 1.5s', 'ODR 3.0s', 'ODRd'.
+        Each ``data`` has shape (n_neurons, 4).
+    """
+    import os
+
+    odr_all, ws_odr = load_odr_data(
+        os.path.join(data_dir, 'odr_data_both_sig_is_best_20240109.mat'))
+    ids_all, age_all, mature_all, delay_all = extract_metadata(
+        ws_odr, odr_all.shape[0])
+
+    odrd_raw, ws_odrd = load_odrd_data(
+        os.path.join(data_dir, 'odrd_data_sig_on_best_20231018.mat'))
+    odrd_ids, odrd_age, odrd_mat, _ = extract_metadata(ws_odrd, odrd_raw.shape[0])
+
+    task_data = {}
+    for delay, name in [(1.5, 'ODR 1.5s'), (3.0, 'ODR 3.0s')]:
+        mask = delay_all == delay
+        task_data[name] = dict(
+            data=odr_all[mask][:, CARDINAL_COLS],
+            ids=ids_all[mask],
+            abs_age=_abs_age_months(age_all[mask], mature_all[mask]),
+        )
+
+    task_data['ODRd'] = dict(
+        data=odrd_raw,
+        ids=odrd_ids,
+        abs_age=_abs_age_months(odrd_age, odrd_mat),
+    )
+
+    return task_data
+
+
+def filter_common_monkeys(task_data, task_names=None):
+    """Filter task data to only monkeys present in all specified tasks.
+
+    Parameters
+    ----------
+    task_data : dict
+        {task_name: dict(data, ids, ...)}
+    task_names : list of str, optional
+        Tasks to consider. If None, uses all tasks in task_data.
+
+    Returns
+    -------
+    filtered : dict
+        Same structure as task_data, filtered to common monkeys.
+    common_monkeys : list of str
+        Sorted list of common monkey IDs.
+    """
+    if task_names is None:
+        task_names = list(task_data.keys())
+
+    monkey_sets = [set(task_data[name]['ids']) for name in task_names]
+    common = sorted(set.intersection(*monkey_sets))
+
+    filtered = {}
+    for name in task_names:
+        mask = np.isin(task_data[name]['ids'], common)
+        filtered[name] = {k: v[mask] if isinstance(v, np.ndarray) else v
+                          for k, v in task_data[name].items()}
+
+    return filtered, common

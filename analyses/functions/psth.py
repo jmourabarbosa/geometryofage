@@ -5,7 +5,7 @@ Compute PSTHs and tuning curves from raw spike data.
 import numpy as np
 
 
-def compute_single_trial_rates(odr_data, bin_edges):
+def compute_single_trial_rates(odr_data, bin_edges, verbose=True):
     """
     Compute single-trial firing rates for each neuron and condition.
 
@@ -16,6 +16,8 @@ def compute_single_trial_rates(odr_data, bin_edges):
     odr_data : ndarray, shape (n_neurons, n_conditions), dtype=object
     bin_edges : ndarray, shape (n_bins + 1,)
         Time bin edges in milliseconds.
+    verbose : bool
+        Print progress every 500 neurons.
 
     Returns
     -------
@@ -56,7 +58,7 @@ def compute_single_trial_rates(odr_data, bin_edges):
             neuron_rates.append(np.array(trial_rates))
         rates.append(neuron_rates)
 
-        if i % 500 == 0:
+        if verbose and i % 500 == 0:
             print(f"  neuron {i}/{n_neurons}")
 
     return rates
@@ -134,6 +136,23 @@ def compute_flat_tuning(data, t_range, epochs, bin_ms=50):
     tuning, _ = compute_tuning_curves(rates, bc, epochs)
     flat = tuning.reshape(tuning.shape[0], -1)
     return flat, rates, bc
+
+
+def rates_to_psth(rates):
+    """Convert rates list-of-lists to (n_neurons, n_conditions, n_bins) array."""
+    n_neurons = len(rates)
+    n_conds = len(rates[0])
+    n_bins = next(
+        rates[i][c].shape[1]
+        for i in range(n_neurons) for c in range(n_conds)
+        if rates[i][c].shape[0] > 0
+    )
+    psth = np.full((n_neurons, n_conds, n_bins), np.nan)
+    for i in range(n_neurons):
+        for c in range(n_conds):
+            if rates[i][c].shape[0] > 0:
+                psth[i, c] = np.nanmean(rates[i][c], axis=0)
+    return psth
 
 
 def pooled_tuning_by_group(task_data_dict, epochs, age_edges, bin_ms=25):
