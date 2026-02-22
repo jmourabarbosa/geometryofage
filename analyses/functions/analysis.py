@@ -48,24 +48,35 @@ def _mean_within_monkey(me, dist):
     return mean_within
 
 
-def _quantile_bin(values, n_groups, edges=None):
-    """Assign values to quantile-based bins.
+def assign_per_monkey_age_groups(ids, abs_age, n_bins):
+    """Assign neurons to age groups using per-monkey quantile binning.
 
     Parameters
     ----------
-    values : array-like
-    n_groups : int
-    edges : ndarray, optional
-        Pre-computed bin edges. Computed from *values* if None.
+    ids : ndarray of str
+        Monkey ID per neuron.
+    abs_age : ndarray
+        Absolute age in months per neuron.
+    n_bins : int
+        Number of quantile bins per monkey.
 
     Returns
     -------
-    labels : ndarray of int
-    edges : ndarray
+    groups : ndarray of int
+        Age group per neuron (0 to n_bins-1).
+    monkey_edges : dict
+        {monkey_id: tuple of edges} — inner bin edges per monkey.
     """
-    if edges is None:
-        edges = np.quantile(values, np.linspace(0, 1, n_groups + 1))
-    return np.clip(np.digitize(values, edges[1:-1]), 0, n_groups - 1), edges
+    groups = np.full(len(ids), -1, dtype=int)
+    monkey_edges = {}
+    for mid in sorted(set(ids)):
+        mask = ids == mid
+        ages_m = abs_age[mask]
+        pcts = np.linspace(0, 100, n_bins + 1)[1:-1]
+        edges = tuple(np.unique(np.percentile(ages_m, pcts)))
+        monkey_edges[mid] = edges
+        groups[mask] = np.digitize(ages_m, edges)
+    return groups, monkey_edges
 
 
 def assign_age_groups(age, edges):
@@ -120,103 +131,6 @@ def cross_monkey_analysis(entries, dist):
         mean_within=mean_within, within_all_pairs=within_all,
         t_stat=t_stat, p_val=p_val, monkey_names=monkey_names,
     )
-
-
-def cross_monkey_by_age(tuning, ids, age, n_pcs, min_neurons,
-                        window_months=6, step_months=2, zscore=True):
-    """Per-pair cross-monkey Procrustes distance in sliding age windows.
-
-    Two-pass approach:
-      1. Find which monkeys have enough neurons in *every* window.
-      2. Restrict to those common monkeys and compute per-pair distances.
-
-    Because only common monkeys are used, every pair has a value in every
-    window (no NaNs — lines are continuous).
-
-    Parameters
-    ----------
-    tuning : ndarray, shape (n_neurons, n_features)
-    ids : ndarray of str
-    age : ndarray, age in months (e.g. absolute chronological age)
-    n_pcs, min_neurons : int
-    window_months, step_months : float
-    zscore : bool
-
-    Returns
-    -------
-    centers : ndarray, window center ages
-    pair_dist : dict  {(monkey_a, monkey_b): ndarray}
-        One distance per window, aligned with *centers*.
-    n_neurons : ndarray, total (common-monkey) neurons per window
-    common_monkeys : list of str
-    """
-    from itertools import combinations
-    from .representations import build_representations
-    from .procrustes import procrustes_distance_matrix
-
-    half = window_months / 2
-    starts = np.arange(age.min(),
-                       age.max() - window_months + step_months,
-                       step_months)
-
-    # --- Pass 1: find monkeys that survive build_representations in every window ---
-    window_monkeys = []
-    valid_starts = []
-    for t0 in starts:
-        mask = (age >= t0) & (age < t0 + window_months)
-        if mask.sum() < min_neurons:
-            continue
-        groups = np.zeros(mask.sum(), dtype=int)
-        entries = build_representations(tuning[mask], ids[mask], groups,
-                                        n_pcs=n_pcs, min_neurons=min_neurons,
-                                        zscore=zscore)
-        if len(entries) < 2:
-            continue
-        me, _ = extract_entry_arrays(entries)
-        window_monkeys.append(set(me))
-        valid_starts.append(t0)
-
-    if len(window_monkeys) == 0:
-        return np.array([]), {}, np.array([]), []
-
-    common = sorted(set.intersection(*window_monkeys))
-    if len(common) < 2:
-        return np.array([]), {}, np.array([]), []
-
-    # --- Pass 2: compute per-pair distances using only common monkeys ---
-    pairs = list(combinations(common, 2))
-    pair_dist = {p: [] for p in pairs}
-    centers_list, nn_list = [], []
-
-    for t0 in valid_starts:
-        mask = (age >= t0) & (age < t0 + window_months)
-        common_mask = mask & np.isin(ids, common)
-
-        groups = np.zeros(common_mask.sum(), dtype=int)
-        entries = build_representations(tuning[common_mask], ids[common_mask],
-                                        groups, n_pcs=n_pcs,
-                                        min_neurons=min_neurons, zscore=zscore)
-        me, _ = extract_entry_arrays(entries)
-        present = set(me)
-
-        # skip window if a common monkey dropped out after zscore cleaning
-        if not set(common).issubset(present):
-            continue
-
-        dist = procrustes_distance_matrix(entries)
-        for pa, pb in pairs:
-            ia = np.where(me == pa)[0][0]
-            ib = np.where(me == pb)[0][0]
-            pair_dist[(pa, pb)].append(dist[ia, ib])
-
-        centers_list.append(t0 + half)
-        nn_list.append(common_mask.sum())
-
-    for p in pairs:
-        pair_dist[p] = np.array(pair_dist[p])
-
-    return (np.array(centers_list), pair_dist,
-            np.array(nn_list), common)
 
 
 def cross_monkey_by_group(task_data, psth_data, age_groups, n_pcs, min_neurons,

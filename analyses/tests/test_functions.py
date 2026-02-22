@@ -14,12 +14,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from functions.representations import (zscore_neurons, pca_reduce, build_representations,
                                        _clean_neurons, _build_entry)
 from functions.procrustes import procrustes_distance_matrix
-from functions.analysis import (assign_age_groups, cross_monkey_analysis, cross_age_analysis,
-                                extract_entry_arrays, _mean_within_monkey, _quantile_bin)
+from functions.analysis import (assign_age_groups, assign_per_monkey_age_groups,
+                                cross_monkey_analysis, cross_age_analysis,
+                                extract_entry_arrays, _mean_within_monkey)
 from functions.temporal import rates_to_psth, temporal_cross_monkey, temporal_cross_age
 from functions.plotting import (_baseline_normalize, plot_cross_monkey, plot_distance_matrices,
                                 plot_cross_age, plot_temporal,
-                                plot_cross_task)
+                                plot_cross_task,
+                                plot_3d_representation, wall_projections)
+from functions.representations import tuning_to_matrix
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -615,27 +618,53 @@ class TestBuildEntry:
         assert entry['group'] == 2
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# analysis.py — _quantile_bin
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestQuantileBin:
+class TestAssignPerMonkeyAgeGroups:
     def test_basic(self):
-        values = np.arange(100, dtype=float)
-        labels, edges = _quantile_bin(values, 4)
-        assert set(labels) == {0, 1, 2, 3}
-        assert len(edges) == 5
+        ids = np.array(['A'] * 30 + ['B'] * 30)
+        ages = np.concatenate([np.linspace(20, 80, 30), np.linspace(30, 90, 30)])
+        groups, edges = assign_per_monkey_age_groups(ids, ages, 3)
+        assert groups.shape == (60,)
+        assert set(groups) == {0, 1, 2}
+        assert 'A' in edges and 'B' in edges
+        assert len(edges['A']) == 2  # 3 bins -> 2 inner edges
 
-    def test_precomputed_edges(self):
-        values = np.array([10, 20, 30, 40, 50], dtype=float)
-        edges = np.array([0, 15, 35, 60], dtype=float)
-        labels, edges_out = _quantile_bin(values, 3, edges=edges)
-        np.testing.assert_array_equal(edges_out, edges)
-        # 10 < 15 -> bin 0, 20 and 30 between 15 and 35 -> bin 1, 40 and 50 > 35 -> bin 2
-        np.testing.assert_array_equal(labels, [0, 1, 1, 2, 2])
+    def test_single_monkey(self):
+        ids = np.array(['X'] * 20)
+        ages = np.linspace(10, 50, 20)
+        groups, edges = assign_per_monkey_age_groups(ids, ages, 2)
+        assert set(groups) == {0, 1}
+        assert len(edges['X']) == 1
 
-    def test_clipping(self):
-        values = np.array([0, 100], dtype=float)
-        labels, _ = _quantile_bin(values, 3)
-        assert labels[0] == 0
-        assert labels[-1] == 2
+
+class TestTuningToMatrix:
+    def test_shape(self):
+        info = {'tc': np.random.default_rng(0).standard_normal((5, 4, 2))}
+        pts = tuning_to_matrix(info, n_dims=3)
+        assert pts.shape == (8, 3)  # 4*2 points, 3 dims
+
+    def test_fewer_dims(self):
+        info = {'tc': np.random.default_rng(0).standard_normal((5, 4, 2))}
+        pts = tuning_to_matrix(info, n_dims=2)
+        assert pts.shape == (8, 2)
+
+
+class TestPlot3dRepresentation:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        pts = np.random.default_rng(0).standard_normal((4, 3))
+        colors = ['r', 'g', 'b', 'y']
+        plot_3d_representation(ax, pts, colors)
+        plt.close('all')
+
+
+class TestWallProjections:
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        pts = np.random.default_rng(0).standard_normal((4, 3))
+        ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2])
+        wall_projections(ax, pts)
+        plt.close('all')

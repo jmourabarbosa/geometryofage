@@ -199,42 +199,6 @@ def pooled_tuning_by_group(task_data_dict, epochs, age_edges, bin_ms=25):
     return grouped, epoch_names
 
 
-def group_tuning_curves(rates, bc, epochs, ids, age_groups):
-    """Compute tuning curves and group by monkey and age group.
-
-    Parameters
-    ----------
-    rates : list of lists
-        Output of compute_single_trial_rates.
-    bc : ndarray
-        Bin centers.
-    epochs : dict
-        Epoch windows, e.g. {"cue": (0, 500), "delay": (500, 2000)}.
-    ids : ndarray of str (n_neurons,)
-        Monkey ID per neuron.
-    age_groups : ndarray of int (n_neurons,)
-        Age group per neuron.
-
-    Returns
-    -------
-    grouped : dict
-        {monkey: {age_group: ndarray (n_neurons_subset, n_conditions, n_epochs)}}
-    epoch_names : list of str
-    """
-    tuning, epoch_names = compute_tuning_curves(rates, bc, epochs)
-
-    grouped = {}
-    for mid in sorted(set(ids)):
-        grouped[mid] = {}
-        for g in sorted(set(age_groups)):
-            mask = (ids == mid) & (age_groups == g)
-            if mask.sum() == 0:
-                continue
-            grouped[mid][g] = tuning[mask]
-
-    return grouped, epoch_names
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _flatten(x):

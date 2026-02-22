@@ -4,7 +4,6 @@ Load behavioral data and compute behavioral distance matrices.
 
 import numpy as np
 import pandas as pd
-import scipy.stats as sts
 
 from .analysis import assign_age_groups
 
@@ -14,12 +13,6 @@ TASK_MAP_SAC = {
     'ODR 1.5s': 'ODR',
     'ODR 3.0s': 'ODR3',
     'ODRd': 'ODRd',
-}
-
-TASK_MAP_PERCORR = {
-    'ODR 1.5s': 'ODR',
-    'ODR 3.0s': 'ODR3',
-    'ODRd': ['ODRdistractor_cardinal', 'ODRdistractor_diagonal'],
 }
 
 DI_COLS_8 = [f'DI_{i}' for i in range(1, 9)]
@@ -50,22 +43,6 @@ def load_behavioral_data(sac_path, sac_odrd_path=None):
         df = pd.concat([df, odrd], ignore_index=True)
 
     return df
-
-
-def load_percorr_data(beh_path, odrd_path):
-    """Load and concatenate percent-correct data from both files.
-
-    Adds ``age_month`` to the ODRd dataframe (derived from ``age`` in days).
-
-    Returns
-    -------
-    DataFrame with columns: Monkey, Task, age_month, percorr
-    """
-    beh = pd.read_csv(beh_path)[['Monkey', 'Task', 'age_month', 'percorr']]
-    odrd = pd.read_csv(odrd_path)
-    odrd['age_month'] = odrd['age'] / 365.0 * 12.0
-    odrd = odrd[['Monkey', 'Task', 'age_month', 'percorr']]
-    return pd.concat([beh, odrd], ignore_index=True)
 
 
 def behavioral_distance_matrices(beh_df, entries, age_edges, task_name):
@@ -125,43 +102,53 @@ def behavioral_distance_matrices(beh_df, entries, age_edges, task_name):
     return di_dist, rt_dist, di_vals, rt_vals
 
 
-def percorr_distance_matrix(percorr_df, entries, age_edges, task_name):
-    """Compute percent-correct distance matrix matching neural entries.
+def get_behavioral_values(beh_df, entries, task_name, monkey_edges):
+    """Get per-entry mean DI and RT using per-monkey age bin edges.
+
+    Unlike ``behavioral_distance_matrices`` (which uses global age edges),
+    this function uses monkey-specific bin edges for age grouping.
 
     Parameters
     ----------
-    percorr_df : DataFrame
-        Concatenated percent-correct data (from load_percorr_data).
+    beh_df : DataFrame
+        Behavioral data from ``load_behavioral_data``.
     entries : list of dict
-    age_edges : tuple
+        Each dict has 'monkey' and 'group' keys.
     task_name : str
+        Neural task name (e.g. 'ODR 1.5s').
+    monkey_edges : dict
+        {(task_name, monkey_id): tuple of edges} — per-monkey age bin edges.
 
     Returns
     -------
-    pc_dist : ndarray (n, n)
-    pc_vals : ndarray (n,)
+    di_vals : ndarray (n,)
+    rt_vals : ndarray (n,)
     """
-    tasks = TASK_MAP_PERCORR.get(task_name)
-    if tasks is None:
-        raise ValueError(f'No percorr data for task {task_name!r}')
-    if isinstance(tasks, str):
-        tasks = [tasks]
-
-    sub = percorr_df[percorr_df['Task'].isin(tasks)].copy()
-    sub['age_group'] = assign_age_groups(sub['age_month'].values, age_edges)
+    beh_task = TASK_MAP_SAC[task_name]
+    sub = beh_df[beh_df['Task'] == beh_task].copy()
+    use_mean = (beh_task == 'ODRd')
 
     n = len(entries)
-    pc_vals = np.full(n, np.nan)
+    di_vals = np.full(n, np.nan)
+    rt_vals = np.full(n, np.nan)
 
     for idx, e in enumerate(entries):
-        mask = (sub['Monkey'] == e['monkey']) & (sub['age_group'] == e['group'])
-        rows = sub[mask]
+        mid, grp = e['monkey'], e['group']
+        edges = monkey_edges[(task_name, mid)]
+        rows = sub[sub['Monkey'] == mid].copy()
         if len(rows) == 0:
             continue
-        pc_vals[idx] = np.nanmean(rows['percorr'].values)
-
-    pc_dist = np.abs(pc_vals[:, None] - pc_vals[None, :])
-    return pc_dist, pc_vals
+        rows['ag'] = np.digitize(rows['age_month'].values, edges)
+        rows = rows[rows['ag'] == grp]
+        if len(rows) == 0:
+            continue
+        if use_mean:
+            di_vals[idx] = np.nanmean(rows['DI'].values)
+            rt_vals[idx] = np.nanmean(rows['RT'].values)
+        else:
+            di_vals[idx] = np.nanmean(rows[DI_COLS_8].values)
+            rt_vals[idx] = np.nanmean(rows[RT_COLS_8].values)
+    return di_vals, rt_vals
 
 
 def _upper_tri(mat):
@@ -170,59 +157,3 @@ def _upper_tri(mat):
     return mat[idx]
 
 
-def _spearman_pair(neural_vec, beh_vec):
-    """Spearman correlation between two vectors, skipping NaNs."""
-    valid = np.isfinite(neural_vec) & np.isfinite(beh_vec)
-    if valid.sum() < 3:
-        return dict(r=np.nan, p=np.nan, n_pairs=int(valid.sum()))
-    r, p = sts.spearmanr(neural_vec[valid], beh_vec[valid])
-    return dict(r=r, p=p, n_pairs=int(valid.sum()))
-
-
-def correlate_behavior_neural(neural_dist, beh_dists):
-    """Correlate behavioral and neural distance matrices (upper triangle).
-
-    Uses Spearman rank correlation on upper-triangle pairs.
-
-    Parameters
-    ----------
-    neural_dist : ndarray (n, n)
-    beh_dists : dict
-        {label: ndarray (n, n)} — behavioral distance matrices to correlate.
-
-    Returns
-    -------
-    dict  {label: {r, p, n_pairs}}
-    """
-    neural_vec = _upper_tri(neural_dist)
-    out = {}
-    for label, beh_mat in beh_dists.items():
-        out[label] = _spearman_pair(neural_vec, _upper_tri(beh_mat))
-    return out
-
-
-def bootstrap_correlation(neural_vec, beh_vec, n_boot=1000, seed=42):
-    """Bootstrap Spearman rho by resampling pairs.
-
-    Parameters
-    ----------
-    neural_vec, beh_vec : 1-D arrays (same length)
-    n_boot : int
-    seed : int
-
-    Returns
-    -------
-    boots : ndarray (n_boot,)  — bootstrap distribution of rho values
-    """
-    valid = np.isfinite(neural_vec) & np.isfinite(beh_vec)
-    nv = neural_vec[valid]
-    bv = beh_vec[valid]
-    n = len(nv)
-    rng = np.random.default_rng(seed)
-    boots = np.full(n_boot, np.nan)
-    for b in range(n_boot):
-        idx = rng.choice(n, n, replace=True)
-        if np.std(nv[idx]) == 0 or np.std(bv[idx]) == 0:
-            continue
-        boots[b], _ = sts.spearmanr(nv[idx], bv[idx])
-    return boots
