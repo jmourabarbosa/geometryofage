@@ -33,4 +33,4 @@ from .plotting import (plot_cross_monkey, plot_distance_matrices, plot_cross_age
                        draw_neural_vs_behavior, draw_cross_epoch_vs_behavior,
                        draw_correlation_matrices,
                        TASK_COLORS, STIM_COLORS, STIM_LABELS, AGE_COLORS,
-                       AGE_GROUP_LABELS, TASK_EVENTS, CORR_SYMBOL, _corr)
+                       AGE_GROUP_LABELS, TASK_EVENTS, _corr)

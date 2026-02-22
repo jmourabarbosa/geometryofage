@@ -154,7 +154,7 @@ def cross_monkey_analysis(entries, dist):
 
 
 def cross_monkey_by_group(task_data, psth_data, age_groups, n_pcs, min_neurons,
-                          group_labels, method='pearson'):
+                          group_labels):
     """Cross-monkey Procrustes distance per age group with linear regression.
 
     Only uses monkeys with >= min_neurons in every age group.
@@ -214,11 +214,7 @@ def cross_monkey_by_group(task_data, psth_data, age_groups, n_pcs, min_neurons,
 
         all_g = np.array(all_g)
         all_d = np.array(all_d)
-        slope, intercept, r_lr, p_lr, se = sts.linregress(all_g, all_d)
-        if method == 'spearman':
-            r, p = sts.spearmanr(all_g, all_d)
-        else:
-            r, p = r_lr, p_lr
+        slope, intercept, r, p, se = sts.linregress(all_g, all_d)
 
         pooled_groups.append(all_g)
         pooled_dists.append(all_d)
@@ -227,18 +223,13 @@ def cross_monkey_by_group(task_data, psth_data, age_groups, n_pcs, min_neurons,
             group_dists=group_dists, slope=slope, intercept=intercept,
             r=r, p=p, se=se, common=common,
             n_monkeys=len(monkeys), n_neurons=mask.sum(),
-            n_total=len(ids), method=method,
+            n_total=len(ids),
         )
 
     pg = np.concatenate(pooled_groups)
     pooled_d = np.concatenate(pooled_dists)
-    s_all, i_all, r_lr_all, p_lr_all, se_all = sts.linregress(pg, pooled_d)
-    if method == 'spearman':
-        r_all, p_all = sts.spearmanr(pg, pooled_d)
-    else:
-        r_all, p_all = r_lr_all, p_lr_all
-    pooled = dict(slope=s_all, intercept=i_all, r=r_all, p=p_all, se=se_all,
-                  method=method)
+    s_all, i_all, r_all, p_all, se_all = sts.linregress(pg, pooled_d)
+    pooled = dict(slope=s_all, intercept=i_all, r=r_all, p=p_all, se=se_all)
 
     return results, pooled
 
@@ -395,7 +386,7 @@ def _assign_splits(ids, rng):
 
 
 def cross_task_cv(tuning_flat, task_ids, n_pcs, min_neurons,
-                  n_iter=100, seed=42, verbose=True, method='pearson'):
+                  n_iter=100, seed=42, verbose=True):
     """Split-half cross-validation loop for cross-task geometry comparison.
 
     Parameters
@@ -490,10 +481,7 @@ def cross_task_cv(tuning_flat, task_ids, n_pcs, min_neurons,
                 vb = [d_b[ib[x], ib[y]]
                       for x in range(len(common))
                       for y in range(x + 1, len(common))]
-                if method == 'spearman':
-                    r, _ = sts.spearmanr(va, vb)
-                else:
-                    r, _ = sts.pearsonr(va, vb)
+                _, _, r, _, _ = sts.linregress(va, vb)
                 iter_mantel_r[(ta, tb)].append(r)
 
         last_dist = dist
