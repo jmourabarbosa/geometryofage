@@ -876,7 +876,7 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
                 lw=2.5, alpha=0.6, zorder=5)
         for i in range(len(mean_pts)):
             ax.scatter(mean_pts[i, 0], mean_pts[i, 1], mean_pts[i, 2],
-                       s=35, color='k', alpha=1.0,
+                       s=20, color='k', alpha=1.0,
                        edgecolors=stim_colors[i], linewidths=1.5,
                        zorder=10, clip_on=False)
 
@@ -889,6 +889,7 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
     ax.xaxis.set_pane_color(_pane)  # yz plane
     ax.yaxis.set_pane_color(_pane)  # xz plane
     ax.zaxis.set_pane_color(_pane)  # xy plane (floor)
+    ax.view_init(elev=30, azim=-75)
     # Hide default z-axis spine line (replaced by back-corner verticals)
     ax.zaxis.line.set_color((1, 1, 1, 0))
 
