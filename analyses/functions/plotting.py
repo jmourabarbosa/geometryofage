@@ -875,7 +875,6 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
         wall_projections(ax, mean_pts, color=ec, alpha=0.15)
         wall_surface_projections(ax, mean_pts, color=ec, alpha=0.10)
 
-    ax.view_init(elev=25, azim=-135)
     ax.set_xticks([]); ax.set_yticks([]); ax.set_zticks([])
     ax.set_xlabel(''); ax.set_ylabel(''); ax.set_zlabel('')
     ax.xaxis.set_pane_color((1, 1, 1, 0))
