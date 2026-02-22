@@ -855,6 +855,12 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
 
     ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
 
+    # Floor plane edges (draw first so data renders on top)
+    _lw, _c = 0.5, 'k'
+    ax.plot([lim, lim], [-lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
+    ax.plot([-lim, lim], [lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
+    ax.plot([-lim, -lim], [-lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
+
     for ename in plot_epochs:
         ei = enames.index(ename)
         epoch_idx = np.arange(ei, n_conds * n_ep, n_ep)
@@ -865,12 +871,12 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
 
         loop = np.vstack([mean_pts, mean_pts[0:1]])
         ax.plot(loop[:, 0], loop[:, 1], loop[:, 2], '-', color=ec,
-                lw=2.5, alpha=0.6, zorder=1)
+                lw=2.5, alpha=0.6, zorder=5)
         for i in range(len(mean_pts)):
             ax.scatter(mean_pts[i, 0], mean_pts[i, 1], mean_pts[i, 2],
                        s=60, color='k', alpha=1.0,
                        edgecolors=stim_colors[i], linewidths=1.5,
-                       zorder=2, clip_on=False)
+                       zorder=10, clip_on=False)
 
         wall_projections(ax, mean_pts, color=ec, alpha=0.15)
         wall_surface_projections(ax, mean_pts, color=ec, alpha=0.10)
@@ -881,12 +887,6 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
     ax.xaxis.set_pane_color(_pane)  # yz plane
     ax.yaxis.set_pane_color(_pane)  # xz plane
     ax.zaxis.set_pane_color(_pane)  # xy plane (floor)
-
-    # Draw missing edges of the xy floor plane
-    _lw, _c = 0.5, 'k'
-    ax.plot([lim, lim], [-lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
-    ax.plot([-lim, lim], [lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
-    ax.plot([-lim, -lim], [-lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
 
 
 def draw_cross_task_bars(ax, ct_results, cat_colors=None):
