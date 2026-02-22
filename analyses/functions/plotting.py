@@ -558,7 +558,7 @@ def plot_behavior_neural_bars(results, beh_dist):
     plt.show()
 
 
-def plot_age_distributions(task_data, age_edges=None):
+def plot_age_distributions(task_data, age_edges=None,bins=25):
     """Histogram of neuron ages per monkey, one row per task.
 
     Parameters
@@ -567,6 +567,8 @@ def plot_age_distributions(task_data, age_edges=None):
         {task_name: dict(ids=..., abs_age=...)}
     age_edges : tuple of float, optional
         Bin edges for age groups; drawn as vertical lines.
+    bins : int, optional
+        Number of bins for the histogram.
     """
     for name in task_data:
         ids = task_data[name]['ids']
@@ -578,11 +580,11 @@ def plot_age_distributions(task_data, age_edges=None):
         if n == 1:
             axes = [axes]
 
-        bins = np.linspace(abs_age.min() - 1, abs_age.max() + 1, 25)
+        bin_edges = np.linspace(abs_age.min() - 1, abs_age.max() + 1, bins)
 
         for ax, mid in zip(axes, monkeys):
             ages = abs_age[ids == mid]
-            ax.hist(ages, bins=bins, color='steelblue', edgecolor='white', linewidth=0.4)
+            ax.hist(ages, bins=bin_edges, color='steelblue', edgecolor='white', linewidth=0.4)
             ax.set_title(f'{mid} (n={len(ages)})', fontsize=9)
             if age_edges is not None:
                 for edge in age_edges:
