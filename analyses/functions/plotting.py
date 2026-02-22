@@ -882,6 +882,11 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
     ax.yaxis.set_pane_color(_pane)  # xz plane
     ax.zaxis.set_pane_color(_pane)  # xy plane (floor)
 
+    # Draw the 2 missing edges of the xy floor plane
+    _lw, _c = 0.5, 'k'
+    ax.plot([lim, lim], [-lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
+    ax.plot([-lim, lim], [lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
+
 
 def draw_cross_task_bars(ax, ct_results, cat_colors=None):
     """Bar chart of mean Procrustes distance per cross-task category."""
