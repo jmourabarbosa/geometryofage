@@ -27,7 +27,7 @@ from functions.plotting import (_baseline_normalize, plot_cross_monkey, plot_dis
                                 plot_3d_representation, wall_projections,
                                 plot_3d_grid, plot_within_monkey_alignment,
                                 plot_global_alignment, plot_cross_epoch_correlations,
-                                p_to_stars,
+                                p_to_stars, _corr, CORR_SYMBOL,
                                 draw_3d_alignment, draw_cross_task_bars,
                                 draw_cross_age_bars, draw_cross_monkey_scatter,
                                 draw_neural_vs_behavior, draw_cross_epoch_vs_behavior,
@@ -880,16 +880,41 @@ class TestPToStars:
         assert p_to_stars(0.0001) == '***'
         assert p_to_stars(0.005) == '**'
         assert p_to_stars(0.03) == '*'
-        assert p_to_stars(0.1) == 'ns'
+        assert p_to_stars(0.1) == 'n.s.'
 
     def test_custom_ns_label(self):
         assert p_to_stars(0.5, ns_label='') == ''
-        assert p_to_stars(0.5, ns_label='n.s.') == 'n.s.'
+        assert p_to_stars(0.5, ns_label='ns') == 'ns'
 
     def test_boundary_values(self):
         assert p_to_stars(0.001) == '**'   # not < 0.001
         assert p_to_stars(0.01) == '*'     # not < 0.01
-        assert p_to_stars(0.05) == 'ns'    # not < 0.05
+        assert p_to_stars(0.05) == 'n.s.'  # not < 0.05
+
+
+class TestCorr:
+    def test_pearson(self):
+        x = np.array([1, 2, 3, 4, 5], dtype=float)
+        y = np.array([2, 4, 5, 4, 5], dtype=float)
+        r, p, slope, intercept = _corr(x, y, method='pearson')
+        assert -1 <= r <= 1
+        assert p >= 0
+        assert slope != 0
+
+    def test_spearman(self):
+        x = np.array([1, 2, 3, 4, 5], dtype=float)
+        y = np.array([2, 4, 5, 4, 5], dtype=float)
+        r, p, slope, intercept = _corr(x, y, method='spearman')
+        assert -1 <= r <= 1
+        # slope/intercept still come from linregress
+        r_p, _, slope_p, intercept_p = _corr(x, y, method='pearson')
+        # Spearman and Pearson r may differ
+        assert slope == slope_p  # linregress slope is method-independent
+        assert intercept == intercept_p
+
+    def test_corr_symbol(self):
+        assert CORR_SYMBOL['pearson'] == 'r'
+        assert CORR_SYMBOL['spearman'] == '\u03c1'
 
 
 class TestDraw3dAlignment:
@@ -947,13 +972,16 @@ class TestDrawCrossMonkeyScatter:
                 'group_dists': {0: rng.uniform(0.1, 0.5, 10),
                                 1: rng.uniform(0.2, 0.6, 10),
                                 2: rng.uniform(0.3, 0.7, 10)},
-                'slope': 0.05, 'intercept': 0.2, 'p': 0.03,
+                'slope': 0.05, 'intercept': 0.2, 'r': 0.5, 'p': 0.03,
+                'method': 'pearson',
             },
         }
-        pooled = {'slope': 0.04, 'intercept': 0.25, 'p': 0.01}
+        pooled = {'slope': 0.04, 'intercept': 0.25, 'r': 0.6, 'p': 0.01,
+                  'method': 'pearson'}
         fig, ax = plt.subplots()
         draw_cross_monkey_scatter(ax, results_by_group, pooled,
-                                  ['young', 'middle', 'old'], TASK_COLORS)
+                                  ['young', 'middle', 'old'], TASK_COLORS,
+                                  method='pearson')
         plt.close('all')
 
 
@@ -985,13 +1013,28 @@ class TestDrawNeuralVsBehavior:
         }
         fig, ax = plt.subplots()
         draw_neural_vs_behavior(ax, indiv_results, beh_dist, 'rt_dist', TASK_COLORS,
-                                xlabel='RT distance', show_ylabel=False, show_left_spine=False)
+                                xlabel='RT distance', show_ylabel=False, show_left_spine=False,
+                                method='pearson')
+        plt.close('all')
+
+    def test_smoke_spearman(self):
+        import matplotlib.pyplot as plt
+        rng = np.random.default_rng(0)
+        n = 6
+        indiv_results = {
+            'ODR 1.5s': {'dist': rng.uniform(0.1, 0.5, (n, n))},
+        }
+        beh_dist = {
+            'ODR 1.5s': {'di_dist': rng.uniform(0, 1, (n, n))},
+        }
+        fig, ax = plt.subplots()
+        draw_neural_vs_behavior(ax, indiv_results, beh_dist, 'di_dist', TASK_COLORS,
+                                xlabel='DI distance', method='spearman')
         plt.close('all')
 
 
 class TestDrawCrossEpochVsBehavior:
-    def test_smoke(self):
-        import matplotlib.pyplot as plt
+    def _make_data(self):
         rng = np.random.default_rng(0)
         cross_epoch = {
             'ODRd': {
@@ -1012,10 +1055,26 @@ class TestDrawCrossEpochVsBehavior:
             'RT': [300, 310, 320],
         })
         monkey_edges = {('ODRd', 'M0'): (45,), ('ODRd', 'M1'): (45,)}
+        return cross_epoch, cross_epoch_defs, beh_df, monkey_edges
+
+    def test_smoke(self):
+        import matplotlib.pyplot as plt
+        cross_epoch, cross_epoch_defs, beh_df, monkey_edges = self._make_data()
         fig, ax = plt.subplots()
         draw_cross_epoch_vs_behavior(ax, cross_epoch, cross_epoch_defs, beh_df, monkey_edges,
                                      'delay\u2192response', 'DI', TASK_COLORS,
-                                     xlabel='Procrustes dist.', ylabel='DI')
+                                     xlabel='Procrustes dist.', ylabel='DI',
+                                     method='spearman')
+        plt.close('all')
+
+    def test_smoke_pearson(self):
+        import matplotlib.pyplot as plt
+        cross_epoch, cross_epoch_defs, beh_df, monkey_edges = self._make_data()
+        fig, ax = plt.subplots()
+        draw_cross_epoch_vs_behavior(ax, cross_epoch, cross_epoch_defs, beh_df, monkey_edges,
+                                     'delay\u2192response', 'DI', TASK_COLORS,
+                                     xlabel='Procrustes dist.', ylabel='DI',
+                                     method='pearson')
         plt.close('all')
 
 

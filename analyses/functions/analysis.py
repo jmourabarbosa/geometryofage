@@ -82,6 +82,42 @@ def assign_age_groups(age, edges):
     return np.digitize(age, edges)
 
 
+def neuron_count_matrix(task_data, bins=25):
+    """Neuron counts per monkey and age bin, for each task.
+
+    Uses the union of all monkeys across tasks. Monkeys absent from a
+    task get zero counts.
+
+    Parameters
+    ----------
+    task_data : dict
+        {task_name: dict(ids=ndarray, abs_age=ndarray, ...)}
+    bins : int
+        Number of age bins (shared across all tasks and monkeys).
+
+    Returns
+    -------
+    results : dict
+        {task_name: dict(counts=ndarray, monkeys=list, bin_edges=ndarray)}
+        ``counts`` has shape (n_monkeys, n_bins).  Rows follow ``monkeys``.
+    """
+    all_monkeys = sorted({m for td in task_data.values() for m in set(td['ids'])})
+    all_ages = np.concatenate([td['abs_age'] for td in task_data.values()])
+    bin_edges = np.linspace(all_ages.min() - 1, all_ages.max() + 1, bins + 1)
+
+    results = {}
+    for name in task_data:
+        ids = task_data[name]['ids']
+        abs_age = task_data[name]['abs_age']
+        counts = np.zeros((len(all_monkeys), bins), dtype=int)
+        for i, mid in enumerate(all_monkeys):
+            ages = abs_age[ids == mid]
+            if len(ages) > 0:
+                counts[i], _ = np.histogram(ages, bins=bin_edges)
+        results[name] = dict(counts=counts, monkeys=all_monkeys, bin_edges=bin_edges)
+    return results
+
+
 def cross_monkey_analysis(entries, dist):
     """Adjusted cross-monkey distances and one-sample t-test.
 
@@ -118,7 +154,7 @@ def cross_monkey_analysis(entries, dist):
 
 
 def cross_monkey_by_group(task_data, psth_data, age_groups, n_pcs, min_neurons,
-                          group_labels):
+                          group_labels, method='pearson'):
     """Cross-monkey Procrustes distance per age group with linear regression.
 
     Only uses monkeys with >= min_neurons in every age group.
@@ -178,7 +214,11 @@ def cross_monkey_by_group(task_data, psth_data, age_groups, n_pcs, min_neurons,
 
         all_g = np.array(all_g)
         all_d = np.array(all_d)
-        slope, intercept, r, p, se = sts.linregress(all_g, all_d)
+        slope, intercept, r_lr, p_lr, se = sts.linregress(all_g, all_d)
+        if method == 'spearman':
+            r, p = sts.spearmanr(all_g, all_d)
+        else:
+            r, p = r_lr, p_lr
 
         pooled_groups.append(all_g)
         pooled_dists.append(all_d)
@@ -187,13 +227,18 @@ def cross_monkey_by_group(task_data, psth_data, age_groups, n_pcs, min_neurons,
             group_dists=group_dists, slope=slope, intercept=intercept,
             r=r, p=p, se=se, common=common,
             n_monkeys=len(monkeys), n_neurons=mask.sum(),
-            n_total=len(ids),
+            n_total=len(ids), method=method,
         )
 
     pg = np.concatenate(pooled_groups)
     pooled_d = np.concatenate(pooled_dists)
-    s_all, i_all, r_all, p_all, se_all = sts.linregress(pg, pooled_d)
-    pooled = dict(slope=s_all, intercept=i_all, r=r_all, p=p_all, se=se_all)
+    s_all, i_all, r_lr_all, p_lr_all, se_all = sts.linregress(pg, pooled_d)
+    if method == 'spearman':
+        r_all, p_all = sts.spearmanr(pg, pooled_d)
+    else:
+        r_all, p_all = r_lr_all, p_lr_all
+    pooled = dict(slope=s_all, intercept=i_all, r=r_all, p=p_all, se=se_all,
+                  method=method)
 
     return results, pooled
 
@@ -350,7 +395,7 @@ def _assign_splits(ids, rng):
 
 
 def cross_task_cv(tuning_flat, task_ids, n_pcs, min_neurons,
-                  n_iter=100, seed=42, verbose=True):
+                  n_iter=100, seed=42, verbose=True, method='pearson'):
     """Split-half cross-validation loop for cross-task geometry comparison.
 
     Parameters
@@ -445,7 +490,10 @@ def cross_task_cv(tuning_flat, task_ids, n_pcs, min_neurons,
                 vb = [d_b[ib[x], ib[y]]
                       for x in range(len(common))
                       for y in range(x + 1, len(common))]
-                r, _ = sts.pearsonr(va, vb)
+                if method == 'spearman':
+                    r, _ = sts.spearmanr(va, vb)
+                else:
+                    r, _ = sts.pearsonr(va, vb)
                 iter_mantel_r[(ta, tb)].append(r)
 
         last_dist = dist

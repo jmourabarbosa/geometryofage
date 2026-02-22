@@ -12,7 +12,7 @@ from .analysis import (assign_age_groups, assign_per_monkey_age_groups,
                        cross_monkey_analysis, cross_age_analysis,
                        cross_monkey_by_group,
                        build_epoch_representations, cross_epoch_distances,
-                       cross_task_cv, CAT_NAMES)
+                       cross_task_cv, neuron_count_matrix, CAT_NAMES)
 from .psth import rates_to_psth
 from .temporal import temporal_cross_monkey, temporal_cross_age
 from .behavior import (load_behavioral_data,
@@ -20,7 +20,7 @@ from .behavior import (load_behavioral_data,
                        get_behavioral_values)
 from .plotting import (plot_cross_monkey, plot_distance_matrices, plot_cross_age,
                        plot_temporal, plot_cross_task, plot_age_distributions,
-                       plot_cross_monkey_by_group, plot_cross_age_bars,
+                       plot_cross_monkey_by_group, plot_cross_age_bars, plot_neuron_counts,
                        plot_behavior_neural_bars,
                        plot_3d_representation, wall_projections,
                        plot_surface_patch, wall_surface_projections,
@@ -33,4 +33,4 @@ from .plotting import (plot_cross_monkey, plot_distance_matrices, plot_cross_age
                        draw_neural_vs_behavior, draw_cross_epoch_vs_behavior,
                        draw_correlation_matrices,
                        TASK_COLORS, STIM_COLORS, STIM_LABELS, AGE_COLORS,
-                       AGE_GROUP_LABELS, TASK_EVENTS)
+                       AGE_GROUP_LABELS, TASK_EVENTS, CORR_SYMBOL, _corr)
