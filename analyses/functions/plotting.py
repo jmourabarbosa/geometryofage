@@ -906,7 +906,7 @@ def draw_cross_task_bars(ax, ct_results, cat_colors=None):
     ymin = min(m - s for m, s in zip(means, sems))
     ax.set_ylim(bottom=ymin * 0.9)
     ax.set_xticks(range(len(cat_names)))
-    ax.set_xticklabels(cat_names, fontsize=7)
+    ax.set_xticklabels(cat_names)
     ax.set_ylabel('')
     ax.set_yticks([])
     ax.spines['top'].set_visible(False)
@@ -941,7 +941,7 @@ def draw_cross_age_bars(ax, indiv_results, task_colors):
            edgecolor='k', linewidth=0.5)
     ax.axhline(0, color='k', ls='--', lw=1)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=7)
+    ax.set_xticklabels(labels)
     ax.set_ylabel('')
     ax.set_yticks([])
     ax.spines['top'].set_visible(False)
@@ -955,16 +955,16 @@ def draw_cross_age_bars(ax, indiv_results, task_colors):
         star = p_to_stars(p)
         y_pos = m + s + 0.003 if m >= 0 else m - s - 0.003
         va = 'bottom' if m >= 0 else 'top'
-        ax.text(i, y_pos, star, ha='center', va=va, fontsize=7, fontweight='bold')
+        ax.text(i, y_pos, star, ha='center', va=va, fontweight='bold')
 
     arrow_x = -0.55
     ax.annotate('', xy=(arrow_x, ylim * 0.85), xytext=(arrow_x, 0),
                 arrowprops=dict(arrowstyle='->', color='0.4', lw=1.5))
     ax.annotate('', xy=(arrow_x, -ylim * 0.85), xytext=(arrow_x, 0),
                 arrowprops=dict(arrowstyle='->', color='0.4', lw=1.5))
-    ax.text(arrow_x + 0.15, ylim * 0.5, 'different individuals\n(same age)', fontsize=8,
+    ax.text(arrow_x + 0.15, ylim * 0.5, 'different individuals\n(same age)',
             color='0.4', va='center', ha='center')
-    ax.text(arrow_x + 0.15, -ylim * 0.5, 'different ages\n(same individual)', fontsize=8,
+    ax.text(arrow_x + 0.15, -ylim * 0.5, 'different ages\n(same individual)',
             color='0.4', va='center', ha='center')
     ax.set_xlim(left=-1.0)
 
@@ -1010,10 +1010,11 @@ def draw_cross_monkey_scatter(ax, results_by_group, pooled, age_group_labels, ta
             label=f'All: p={pooled["p"]:.4f}')
 
     ax.set_xticks(range(n_groups))
-    ax.set_xticklabels(age_group_labels, fontsize=8)
+    ax.set_xticklabels(age_group_labels)
     ax.set_ylabel('')
     ax.set_yticks([])
-    ax.legend(fontsize=6)
+    if ax.get_legend_handles_labels()[1]:
+        ax.legend()
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_visible(False)
@@ -1055,11 +1056,12 @@ def draw_neural_vs_behavior(ax, indiv_results, beh_dist, measure, task_colors,
             label=f'All: r={r:.3f} {star}')
 
     if xlabel is not None:
-        ax.set_xlabel(xlabel, fontsize=8)
-    ax.set_ylabel('Neural distance' if show_ylabel else '', fontsize=8)
+        ax.set_xlabel(xlabel)
+    ax.set_ylabel('Neural distance' if show_ylabel else '')
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.legend(fontsize=6)
+    if ax.get_legend_handles_labels()[1]:
+        ax.legend()
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     if not show_left_spine:
@@ -1097,14 +1099,14 @@ def draw_cross_epoch_vs_behavior(ax, cross_epoch, cross_epoch_defs, beh_df, monk
         x_line = np.linspace(all_d.min(), all_d.max(), 50)
         star = p_to_stars(p)
         ax.plot(x_line, m * x_line + b, 'k-', lw=1.5, alpha=0.8)
-        ax.set_title(f'{measure} (\u03c1={rho:.3f} {star})', fontsize=8)
+        ax.set_title(f'{measure} (\u03c1={rho:.3f} {star})')
 
     ax.set_xticks([])
     ax.set_yticks([])
     if xlabel is not None:
-        ax.set_xlabel(xlabel, fontsize=7)
+        ax.set_xlabel(xlabel)
     if ylabel is not None:
-        ax.set_ylabel(ylabel, fontsize=8)
+        ax.set_ylabel(ylabel)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     if not show_left_spine:
@@ -1158,7 +1160,7 @@ def draw_correlation_matrices(fig, gs_slot, cross_epoch, cross_epoch_defs, beh_d
     fig.colorbar(sm, cax=ax_cb, orientation='horizontal', label='Spearman \u03c1')
     ax_cb.xaxis.set_ticks_position('top')
     ax_cb.xaxis.set_label_position('top')
-    ax_cb.tick_params(labelsize=5)
+    ax_cb.tick_params()
 
     for ax_mat, beh_name in [(ax_di_mat, 'DI'), (ax_rt_mat, 'RT')]:
         for k, (r, c) in pos_map.items():
@@ -1170,16 +1172,16 @@ def draw_correlation_matrices(fig, gs_slot, cross_epoch, cross_epoch_defs, beh_d
             if np.isfinite(rho):
                 stars = p_to_stars(p, ns_label='')
                 ax_mat.text(c + 0.5, r + 0.5, f'{rho:.2f}{stars}',
-                            ha='center', va='center', fontsize=8, fontweight='bold')
+                            ha='center', va='center', fontweight='bold')
 
-        ax_mat.text(0.5, 1.5, 'delay', ha='center', va='center', fontsize=6)
+        ax_mat.text(0.5, 1.5, 'delay', ha='center', va='center')
         ax_mat.set_xlim(0, 2)
         ax_mat.set_ylim(2, 0)
         ax_mat.set_xticks([1.5])
-        ax_mat.set_xticklabels(['response'], fontsize=6)
+        ax_mat.set_xticklabels(['response'])
         ax_mat.set_yticks([0.5])
-        ax_mat.set_yticklabels(['cue'], fontsize=6)
+        ax_mat.set_yticklabels(['cue'])
         ax_mat.tick_params(length=0)
         ax_mat.set_aspect('equal')
-        ax_mat.set_title(beh_name, fontsize=8)
+        ax_mat.set_title(beh_name)
         ax_mat.spines[:].set_visible(False)
