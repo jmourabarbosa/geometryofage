@@ -130,6 +130,23 @@ def pca_reduce_tuning(grouped, n_pcs, min_neurons=10):
     return reduced
 
 
+def tuning_to_matrix(info, n_dims=3):
+    """Convert PCA-reduced tuning curves to a point matrix.
+
+    Parameters
+    ----------
+    info : dict
+        Must contain 'tc' with shape (n_pcs, n_conds, n_epochs).
+    n_dims : int
+        Number of PCs to keep.
+
+    Returns
+    -------
+    pts : ndarray, shape (n_conds * n_epochs, n_dims)
+    """
+    return info['tc'][:n_dims].reshape(n_dims, -1).T
+
+
 def build_representations(tuning, ids, groups, n_pcs, min_neurons=10, zscore=True):
     """
     Build PCA representations for each (monkey, group) combination.

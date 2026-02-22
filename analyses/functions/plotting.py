@@ -15,6 +15,44 @@ TASK_EVENTS = {
 TASK_COLORS = {'ODR 1.5s': 'C0', 'ODR 3.0s': 'C1', 'ODRd': 'C2'}
 
 
+def plot_3d_representation(ax, pts, stim_colors, s=40, alpha=1.0,
+                           lw=1.5, edge='k', ew=0.5):
+    """Plot one 3-D representation: colored dots + circular connection.
+
+    Parameters
+    ----------
+    ax : Axes3D
+    pts : ndarray, shape (n_points, 3)
+    stim_colors : list of color specs, one per point
+    s, alpha, lw, edge, ew : scatter/line styling
+    """
+    loop = np.vstack([pts, pts[0:1]])
+    ax.plot(loop[:, 0], loop[:, 1], loop[:, 2], '-', color='gray',
+            lw=lw, alpha=alpha * 0.5, zorder=1)
+    for i in range(len(pts)):
+        ax.scatter(pts[i, 0], pts[i, 1], pts[i, 2],
+                   s=s, color=stim_colors[i], alpha=alpha,
+                   edgecolors=edge, linewidths=ew, zorder=2, clip_on=False)
+
+
+def wall_projections(ax, pts):
+    """Draw gray shadow projections on the 3 walls of a 3-D axis.
+
+    Parameters
+    ----------
+    ax : Axes3D
+    pts : ndarray, shape (n_points, 3)
+    """
+    loop = np.vstack([pts, pts[0:1]])
+    xl, yl, zl = ax.get_xlim(), ax.get_ylim(), ax.get_zlim()
+    ax.plot(loop[:, 0], loop[:, 1], np.full(len(loop), zl[0]),
+            color='gray', lw=2, alpha=0.15)
+    ax.plot(loop[:, 0], np.full(len(loop), yl[1]), loop[:, 2],
+            color='gray', lw=2, alpha=0.15)
+    ax.plot(np.full(len(loop), xl[0]), loop[:, 1], loop[:, 2],
+            color='gray', lw=2, alpha=0.15)
+
+
 def plot_cross_monkey(results):
     """Histograms of within vs cross-monkey distances (raw and adjusted)."""
     n_tasks = len(results)
@@ -411,17 +449,17 @@ def plot_behavior_neural_bars(results, beh_dist):
             nv_v, bv_v = nv[valid], bv[valid]
 
             c = TASK_COLORS[task_name]
-            ax.scatter(bv_v, nv_v, color=c, alpha=0.35, s=18, edgecolors='none')
+            ax.scatter(bv_v-np.mean(bv_v), nv_v-np.mean(nv_v), color=c, alpha=0.35, s=18, edgecolors='none')
 
             # Per-task regression
-            slope, intercept, r, p, se = sts.linregress(bv_v, nv_v)
-            x_fit = np.array([bv_v.min(), bv_v.max()])
+            slope, intercept, r, p, se = sts.linregress(bv_v-np.mean(bv_v), nv_v-np.mean(nv_v))
+            x_fit = np.array([bv_v.min() - np.mean(bv_v), bv_v.max() - np.mean(bv_v)])
             star = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'ns'
             ax.plot(x_fit, intercept + slope * x_fit, color=c, lw=1.5,
                     label=f'{task_name}: r={r:.3f}, p={p:.3f} {star}')
 
-            pooled_n.append(nv_v)
-            pooled_b.append(bv_v)
+            pooled_n.append(nv_v - np.mean(nv_v))
+            pooled_b.append(bv_v - np.mean(bv_v))
 
         # Pooled regression
         pn = np.concatenate(pooled_n)
