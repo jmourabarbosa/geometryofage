@@ -855,12 +855,11 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
 
     ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
 
-    # Floor plane edges + vertical back edges (draw first so data renders on top)
-    _lw, _c = 0.5, 'k'
+    # Box edges: floor + vertical z at back corners (draw first)
+    _lw, _c = 0.4, '0.45'
     ax.plot([lim, lim], [-lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
     ax.plot([-lim, lim], [lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
     ax.plot([-lim, -lim], [-lim, lim], [-lim, -lim], color=_c, lw=_lw, zorder=0)
-    # Vertical z edges at back corners
     ax.plot([-lim, -lim], [lim, lim], [-lim, lim], color=_c, lw=_lw, zorder=0)
     ax.plot([lim, lim], [lim, lim], [-lim, lim], color=_c, lw=_lw, zorder=0)
 
@@ -890,6 +889,8 @@ def draw_3d_alignment(ax, task_result, plot_epochs, epoch_colors, stim_colors, n
     ax.xaxis.set_pane_color(_pane)  # yz plane
     ax.yaxis.set_pane_color(_pane)  # xz plane
     ax.zaxis.set_pane_color(_pane)  # xy plane (floor)
+    # Hide default z-axis spine line (replaced by back-corner verticals)
+    ax.zaxis.line.set_visible(False)
 
 
 def draw_cross_task_bars(ax, ct_results, cat_colors=None):
